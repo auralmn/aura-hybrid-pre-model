@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+LiquidMoe/
+old/
+.pycache
+.pytest_cache/
+.cursor
+__normalized/
+tests/data/
+tests/artifacts/
+vocab_src/

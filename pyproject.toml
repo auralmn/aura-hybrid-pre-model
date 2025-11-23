@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aura-clean"
+version = "0.1.0"
+description = "AURA neuromorphic llm project"
+authors = [{ name = "nicolas cloutier", email = "ncloutier@cognitivaura.com" }]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy<2",
+  "torch>=2.2.2",
+  "pytest",
+  "rich>=14.1.0",
+  "torch-directml>=0.2.5.dev240914",
+  "aiohttp>=3.12.15",
+  "torchvision",
+  "scipy>=1.16.3",
+  "datasets>=4.4.1",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["*"]
+
+[tool.uv]
+# uv will use this project configuration and the virtualenv in .venv by default

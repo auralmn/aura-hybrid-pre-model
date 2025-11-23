@@ -1,0 +1,594 @@
+{
+  "izhikevich_23_firing_patterns": {
+    "description": "Complete list of 23 firing patterns from Izhikevich neuron model with parameter ranges",
+    "model_equations": "v' = 0.04*v² + 5*v + 140 - u + I; u' = a(bv - u); if v ≥ 30mV then v = c, u = u + d",
+    "parameter_descriptions": {
+      "a": "Time scale of recovery variable u (smaller = slower recovery)",
+      "b": "Sensitivity of u to subthreshold fluctuations of v (larger = stronger coupling)",
+      "c": "After-spike reset value of membrane potential v (mV)",
+      "d": "After-spike reset jump of recovery variable u"
+    },
+    "patterns": {
+      "1_tonic_spiking": {
+        "name": "Tonic Spiking",
+        "parameters": {
+          "a": 0.02,
+          "b": 0.2,
+          "c": -65,
+          "d": 6
+        },
+        "parameter_range": {
+          "a": "0.01-0.03",
+          "b": "0.15-0.25",
+          "c": "-70 to -60",
+          "d": "4-8"
+        },
+        "description": "Regular, sustained firing with spike frequency adaptation",
+        "firing_rate_hz": "5-50",
+        "neuron_types": [
+          "Regular spiking pyramidal neurons",
+          "Most cortical excitatory neurons"
+        ],
+        "characteristics": "Gradual spike frequency adaptation, maintains steady firing"
+      },
+      "2_phasic_spiking": {
+        "name": "Phasic Spiking",
+        "parameters": {
+          "a": 0.02,
+          "b": 0.25,
+          "c": -65,
+          "d": 6
+        },
+        "parameter_range": {
+          "a": "0.02-0.03",
+          "b": "0.2-0.3",
+          "c": "-70 to -60",
+          "d": "4-8"
+        },
+        "description": "Single spike or brief burst at stimulus onset, then silence",
+        "firing_rate_hz": "Single spike response",
+        "neuron_types": [
+          "Rapidly adapting sensory neurons",
+          "Some cortical interneurons"
+        ],
+        "characteristics": "Strong adaptation, responds only to stimulus changes"
+      },
+      "3_tonic_bursting": {
+        "name": "Tonic Bursting",
+        "parameters": {
+          "a": 0.02,
+          "b": 0.2,
+          "c": -50,
+          "d": 2
+        },
+        "parameter_range": {
+          "a": "0.015-0.025",
+          "b": "0.15-0.25",
+          "c": "-55 to -45",
+          "d": "1-4"
+        },
+        "description": "Repetitive bursting with each burst containing multiple spikes",
+        "firing_rate_hz": "Burst frequency 1-10 Hz, intraburst 50-200 Hz",
+        "neuron_types": [
+          "Thalamic neurons",
+          "Some cortical layer 5 pyramidal"
+        ],
+        "characteristics": "Regular burst intervals, multiple spikes per burst"
+      },
+      "4_phasic_bursting": {
+        "name": "Phasic Bursting",
+        "parameters": {
+          "a": 0.02,
+          "b": 0.25,
+          "c": -55,
+          "d": 0.05
+        },
+        "parameter_range": {
+          "a": "0.015-0.025",
+          "b": "0.2-0.3",
+          "c": "-60 to -50",
+          "d": "0.01-0.1"
+        },
+        "description": "Single burst at stimulus onset, then quiescence",
+        "firing_rate_hz": "Single burst response, intraburst 100-300 Hz",
+        "neuron_types": [
+          "Some sensory neurons",
+          "Thalamic relay neurons"
+        ],
+        "characteristics": "One burst per stimulus, strong adaptation"
+      },
+      "5_mixed_mode": {
+        "name": "Mixed Mode",
+        "parameters": {
+          "a": 0.02,
+          "b": 0.2,
+          "c": -55,
+          "d": 4
+        },
+        "parameter_range": {
+          "a": "0.015-0.025",
+          "b": "0.15-0.25",
+          "c": "-60 to -50",
+          "d": "2-6"
+        },
+        "description": "Initial bursting followed by regular spiking",
+        "firing_rate_hz": "Burst phase: 50-200 Hz, tonic phase: 10-50 Hz",
+        "neuron_types": [
+          "Intrinsically bursting pyramidal neurons",
+          "Layer 5 cortical pyramidal"
+        ],
+        "characteristics": "Transition from bursting to tonic spiking"
+      },
+      "6_spike_frequency_adaptation": {
+        "name": "Spike Frequency Adaptation",
+        "parameters": {
+          "a": 0.01,
+          "b": 0.2,
+          "c": -65,
+          "d": 8
+        },
+        "parameter_range": {
+          "a": "0.005-0.02",
+          "b": "0.15-0.25",
+          "c": "-70 to -60",
+          "d": "6-12"
+        },
+        "description": "Strong initial firing rate that decreases over time",
+        "firing_rate_hz": "Initial: 50-200 Hz, adapted: 5-30 Hz",
+        "neuron_types": [
+          "Regular spiking neurons",
+          "Sensory adaptation neurons"
+        ],
+        "characteristics": "Strong accommodation, rate decreases significantly"
+      },
+      "7_class_1_excitable": {
+        "name": "Class 1 Excitable",
+        "parameters": {
+          "a": 0.02,
+          "b": -0.1,
+          "c": -55,
+          "d": 6
+        },
+        "parameter_range": {
+          "a": "0.015-0.025",
+          "b": "-0.15 to -0.05",
+          "c": "-60 to -50",
+          "d": "4-8"
+        },
+        "description": "Can fire at arbitrarily low frequencies, frequency increases with current",
+        "firing_rate_hz": "0.1-100 Hz (current dependent)",
+        "neuron_types": [
+          "Many cortical neurons",
+          "Integrator neurons"
+        ],
+        "characteristics": "Smooth frequency-current relationship, integrator dynamics"
+      },
+      "8_class_2_excitable": {
+        "name": "Class 2 Excitable",
+        "parameters": {
+          "a": 0.2,
+          "b": 0.26,
+          "c": -65,
+          "d": 0
+        },
+        "parameter_range": {
+          "a": "0.15-0.25",
+          "b": "0.2-0.3",
+          "c": "-70 to -60",
+          "d": "-2 to 2"
+        },
+        "description": "Fires in specific frequency band, relatively insensitive to current strength",
+        "firing_rate_hz": "75-150 Hz (fixed band)",
+        "neuron_types": [
+          "Fast-spiking interneurons",
+          "Some oscillatory neurons"
+        ],
+        "characteristics": "Fixed frequency band, resonator-like properties"
+      },
+      "9_spike_latency": {
+        "name": "Spike Latency",
+        "parameters": {
+          "a": 0.02,
+          "b": 0.2,
+          "c": -65,
+          "d": 6
+        },
+        "parameter_range": {
+          "a": "0.015-0.025",
+          "b": "0.15-0.25",
+          "c": "-70 to -60",
+          "d": "4-8"
+        },
+        "description": "Variable delay between stimulus and first spike depending on stimulus strength",
+        "firing_rate_hz": "Variable latency 5-200 ms",
+        "neuron_types": [
+          "Many cortical neurons",
+          "Sensory processing neurons"
+        ],
+        "characteristics": "Latency inversely related to stimulus strength"
+      },
+      "10_subthreshold_oscillations": {
+        "name": "Subthreshold Oscillations",
+        "parameters": {
+          "a": 0.05,
+          "b": 0.26,
+          "c": -60,
+          "d": 0
+        },
+        "parameter_range": {
+          "a": "0.03-0.08",
+          "b": "0.2-0.3",
+          "c": "-65 to -55",
+          "d": "-2 to 2"
+        },
+        "description": "Membrane potential oscillations below spike threshold",
+        "firing_rate_hz": "Oscillation frequency 5-40 Hz",
+        "neuron_types": [
+          "Thalamic neurons",
+          "Some cortical interneurons"
+        ],
+        "characteristics": "Subthreshold oscillations, may facilitate resonance"
+      },
+      "11_resonator": {
+        "name": "Resonator",
+        "parameters": {
+          "a": 0.1,
+          "b": 0.26,
+          "c": -60,
+          "d": -1
+        },
+        "parameter_range": {
+          "a": "0.08-0.15",
+          "b": "0.2-0.3",
+          "c": "-65 to -55",
+          "d": "-3 to 1"
+        },
+        "description": "Preferential response to specific input frequencies",
+        "firing_rate_hz": "Resonant frequency 10-40 Hz",
+        "neuron_types": [
+          "Thalamic neurons",
+          "Oscillatory interneurons"
+        ],
+        "characteristics": "Frequency selectivity, subthreshold oscillations"
+      },
+      "12_integrator": {
+        "name": "Integrator",
+        "parameters": {
+          "a": 0.02,
+          "b": -0.1,
+          "c": -55,
+          "d": 6
+        },
+        "parameter_range": {
+          "a": "0.015-0.03",
+          "b": "-0.15 to -0.05",
+          "c": "-60 to -50",
+          "d": "4-8"
+        },
+        "description": "Firing rate proportional to integrated input over time",
+        "firing_rate_hz": "Input-dependent, 1-100 Hz",
+        "neuron_types": [
+          "Working memory neurons",
+          "Decision-making neurons"
+        ],
+        "characteristics": "Memory of past inputs, bistable dynamics"
+      },
+      "13_rebound_spike": {
+        "name": "Rebound Spike",
+        "parameters": {
+          "a": 0.03,
+          "b": 0.25,
+          "c": -60,
+          "d": 4
+        },
+        "parameter_range": {
+          "a": "0.02-0.05",
+          "b": "0.2-0.3",
+          "c": "-65 to -55",
+          "d": "2-6"
+        },
+        "description": "Spike following release from hyperpolarization",
+        "firing_rate_hz": "Single rebound spike",
+        "neuron_types": [
+          "Thalamic neurons",
+          "Low-threshold spiking interneurons"
+        ],
+        "characteristics": "Post-inhibitory rebound, T-type Ca2+ channels"
+      },
+      "14_rebound_burst": {
+        "name": "Rebound Burst",
+        "parameters": {
+          "a": 0.03,
+          "b": 0.25,
+          "c": -52,
+          "d": 0
+        },
+        "parameter_range": {
+          "a": "0.02-0.05",
+          "b": "0.2-0.3",
+          "c": "-55 to -45",
+          "d": "-2 to 2"
+        },
+        "description": "Burst of spikes following release from hyperpolarization",
+        "firing_rate_hz": "Rebound burst 100-300 Hz",
+        "neuron_types": [
+          "Thalamic relay neurons",
+          "Some cortical interneurons"
+        ],
+        "characteristics": "Post-inhibitory burst, deinactivation of Ca2+ channels"
+      },
+      "15_threshold_variability": {
+        "name": "Threshold Variability",
+        "parameters": {
+          "a": 0.03,
+          "b": 0.25,
+          "c": -60,
+          "d": 4
+        },
+        "parameter_range": {
+          "a": "0.02-0.05",
+          "b": "0.2-0.3",
+          "c": "-65 to -55",
+          "d": "2-6"
+        },
+        "description": "Spike threshold varies with membrane potential history",
+        "firing_rate_hz": "Variable, 5-100 Hz",
+        "neuron_types": [
+          "Many cortical neurons",
+          "Variable threshold neurons"
+        ],
+        "characteristics": "Dynamic threshold, history-dependent excitability"
+      },
+      "16_bistability": {
+        "name": "Bistability",
+        "parameters": {
+          "a": 0.1,
+          "b": 0.26,
+          "c": -60,
+          "d": 0
+        },
+        "parameter_range": {
+          "a": "0.08-0.15",
+          "b": "0.2-0.3",
+          "c": "-65 to -55",
+          "d": "-2 to 2"
+        },
+        "description": "Two stable states: quiescent and tonically active",
+        "firing_rate_hz": "0 Hz or 20-100 Hz",
+        "neuron_types": [
+          "Working memory neurons",
+          "Decision neurons"
+        ],
+        "characteristics": "Bistable dynamics, can switch between states"
+      },
+      "17_depolarizing_afterpotential": {
+        "name": "Depolarizing Afterpotential (DAP)",
+        "parameters": {
+          "a": 1.0,
+          "b": 0.2,
+          "c": -60,
+          "d": -21
+        },
+        "parameter_range": {
+          "a": "0.8-1.5",
+          "b": "0.15-0.25",
+          "c": "-65 to -55",
+          "d": "-25 to -15"
+        },
+        "description": "Depolarizing phase following spike that may trigger additional spikes",
+        "firing_rate_Hz": "Doublet/triplet spikes",
+        "neuron_types": [
+          "Some pyramidal neurons",
+          "Motor neurons"
+        ],
+        "characteristics": "Afterdepolarization, may cause spike doublets"
+      },
+      "18_accommodation": {
+        "name": "Accommodation",
+        "parameters": {
+          "a": 0.02,
+          "b": 1.0,
+          "c": -55,
+          "d": 4
+        },
+        "parameter_range": {
+          "a": "0.015-0.025",
+          "b": "0.8-1.2",
+          "c": "-60 to -50",
+          "d": "2-6"
+        },
+        "description": "Threshold increases with slow depolarization",
+        "firing_rate_hz": "Depends on stimulus rate",
+        "neuron_types": [
+          "Many cortical neurons",
+          "Sensory neurons"
+        ],
+        "characteristics": "Accommodating threshold, responds to stimulus changes"
+      },
+      "19_inhibition_induced_spiking": {
+        "name": "Inhibition-Induced Spiking",
+        "parameters": {
+          "a": -0.02,
+          "b": -1.0,
+          "c": -60,
+          "d": 8
+        },
+        "parameter_range": {
+          "a": "-0.03 to -0.01",
+          "b": "-1.2 to -0.8",
+          "c": "-65 to -55",
+          "d": "6-10"
+        },
+        "description": "Spiking triggered by inhibitory input",
+        "firing_rate_hz": "Inhibition-dependent",
+        "neuron_types": [
+          "Some interneurons",
+          "Paradoxical neurons"
+        ],
+        "characteristics": "Inhibition causes excitation, negative parameters"
+      },
+      "20_inhibition_induced_bursting": {
+        "name": "Inhibition-Induced Bursting",
+        "parameters": {
+          "a": -0.026,
+          "b": -1.0,
+          "c": -45,
+          "d": 0
+        },
+        "parameter_range": {
+          "a": "-0.03 to -0.02",
+          "b": "-1.2 to -0.8",
+          "c": "-50 to -40",
+          "d": "-2 to 2"
+        },
+        "description": "Bursting triggered by inhibitory input",
+        "firing_rate_hz": "Inhibition-dependent bursts",
+        "neuron_types": [
+          "Some specialized interneurons"
+        ],
+        "characteristics": "Inhibition triggers bursting, paradoxical response"
+      },
+      "21_excitation_block": {
+        "name": "Excitation Block",
+        "parameters": {
+          "a": 0.02,
+          "b": 0.2,
+          "c": -65,
+          "d": 6
+        },
+        "parameter_range": {
+          "a": "0.015-0.025",
+          "b": "0.15-0.25",
+          "c": "-70 to -60",
+          "d": "4-8"
+        },
+        "description": "High levels of excitation block firing",
+        "firing_rate_hz": "Blocked at high input",
+        "neuron_types": [
+          "Some cortical neurons"
+        ],
+        "characteristics": "Firing blocked by excessive excitation"
+      },
+      "22_all_or_none": {
+        "name": "All-or-None",
+        "parameters": {
+          "a": 0.02,
+          "b": 0.2,
+          "c": -65,
+          "d": 6
+        },
+        "parameter_range": {
+          "a": "0.015-0.025",
+          "b": "0.15-0.25",
+          "c": "-70 to -60",
+          "d": "4-8"
+        },
+        "description": "Threshold behavior - no response below threshold, full response above",
+        "firing_rate_hz": "0 or full response",
+        "neuron_types": [
+          "Many neurons show this property"
+        ],
+        "characteristics": "Sharp threshold, digital-like response"
+      },
+      "23_refractory_period": {
+        "name": "Refractory Period",
+        "parameters": {
+          "a": 0.02,
+          "b": 0.2,
+          "c": -65,
+          "d": 6
+        },
+        "parameter_range": {
+          "a": "0.015-0.025",
+          "b": "0.15-0.25",
+          "c": "-70 to -60",
+          "d": "4-8"
+        },
+        "description": "Period after spike when neuron cannot fire again",
+        "firing_rate_hz": "Limited by refractory period",
+        "neuron_types": [
+          "All neurons have refractory periods"
+        ],
+        "characteristics": "Absolute and relative refractory periods"
+      }
+    },
+    "main_cortical_types": {
+      "RS_regular_spiking": {
+        "parameters": {
+          "a": 0.02,
+          "b": 0.2,
+          "c": -65,
+          "d": 8
+        },
+        "description": "Most common cortical excitatory neurons"
+      },
+      "IB_intrinsically_bursting": {
+        "parameters": {
+          "a": 0.02,
+          "b": 0.2,
+          "c": -55,
+          "d": 4
+        },
+        "description": "Layer 5 pyramidal neurons"
+      },
+      "CH_chattering": {
+        "parameters": {
+          "a": 0.02,
+          "b": 0.2,
+          "c": -50,
+          "d": 2
+        },
+        "description": "Visual cortex burst neurons"
+      },
+      "FS_fast_spiking": {
+        "parameters": {
+          "a": 0.1,
+          "b": 0.2,
+          "c": -65,
+          "d": 2
+        },
+        "description": "Cortical inhibitory interneurons"
+      },
+      "LTS_low_threshold_spiking": {
+        "parameters": {
+          "a": 0.02,
+          "b": 0.25,
+          "c": -65,
+          "d": 2
+        },
+        "description": "Low-threshold interneurons"
+      },
+      "TC_thalamocortical": {
+        "parameters": {
+          "a": 0.02,
+          "b": 0.25,
+          "c": -65,
+          "d": 0.05
+        },
+        "description": "Thalamic relay neurons"
+      }
+    },
+    "parameter_effects": {
+      "a_effects": {
+        "small_values": "0.001-0.02: Slow recovery, tonic firing, longer adaptation",
+        "medium_values": "0.02-0.1: Moderate recovery, mixed patterns",
+        "large_values": "0.1-2.0: Fast recovery, resonator behavior, class 2 excitability"
+      },
+      "b_effects": {
+        "negative_values": "-1.5 to 0: Class 1 excitability, integrator behavior",
+        "small_positive": "0-0.2: Weak coupling, regular spiking",
+        "large_positive": "0.2-1.0: Strong coupling, oscillations, bursting"
+      },
+      "c_effects": {
+        "deep_reset": "-70 to -65 mV: Regular spiking, strong adaptation",
+        "moderate_reset": "-65 to -55 mV: Mixed mode, some bursting",
+        "shallow_reset": "-55 to -45 mV: Strong bursting, chattering"
+      },
+      "d_effects": {
+        "negative_values": "-25 to 0: Afterdepolarization, bistability",
+        "small_positive": "0-4: Moderate adaptation, bursting",
+        "large_positive": "4-15: Strong adaptation, regular spiking"
+      }
+    }
+  }
+}

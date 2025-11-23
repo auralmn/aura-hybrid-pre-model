@@ -1,0 +1,520 @@
+{
+    "precise_neuron_model_parameters": {
+      "description": "Exact numerical parameter sets for specific firing patterns in major neuron models",
+      "models": {
+        "morris_lecar": {
+          "name": "Morris-Lecar Model",
+          "equations": "Cm*dV/dt = -gCa*m∞(V)*(V-VCa) - gK*w*(V-VK) - gL*(V-VL) + I; dw/dt = φ*(w∞(V)-w)/τw(V)",
+          "firing_patterns": {
+            "type_I_excitable": {
+              "parameters": {
+                "gCa": 4.4,
+                "gK": 8.0,
+                "gL": 2.0,
+                "VCa": 120.0,
+                "VK": -84.0,
+                "VL": -60.0,
+                "V1": -1.2,
+                "V2": 18.0,
+                "V3": 2.0,
+                "V4": 30.0,
+                "phi": 0.04,
+                "Cm": 20.0
+              },
+              "current_range": "I > 40 μA/cm²",
+              "firing_rate": "Continuous 0-200 Hz",
+              "characteristics": "Smooth F-I curve, integrator-like"
+            },
+            "type_II_excitable": {
+              "parameters": {
+                "gCa": 4.0,
+                "gK": 8.0,
+                "gL": 2.0,
+                "VCa": 120.0,
+                "VK": -84.0,
+                "VL": -60.0,
+                "V1": -1.2,
+                "V2": 18.0,
+                "V3": 12.0,
+                "V4": 17.4,
+                "phi": 0.067,
+                "Cm": 20.0
+              },
+              "current_range": "I > 90 μA/cm²",
+              "firing_rate": "Fixed band 40-80 Hz",
+              "characteristics": "Discontinuous F-I curve, resonator-like"
+            },
+            "square_wave_bursting": {
+              "parameters": {
+                "gCa": 4.4,
+                "gK": 8.0,
+                "gL": 2.0,
+                "VCa": 120.0,
+                "VK": -84.0,
+                "VL": -60.0,
+                "V1": -1.2,
+                "V2": 18.0,
+                "V3": 2.0,
+                "V4": 30.0,
+                "phi": 0.04,
+                "Cm": 20.0,
+                "gKCa": 2.0,
+                "VKCa": -84.0
+              },
+              "current_range": "I = 80-100 μA/cm²",
+              "burst_frequency": "1-5 Hz",
+              "intraburst_frequency": "50-150 Hz",
+              "characteristics": "3D system with Ca2+-dependent K+ current"
+            },
+            "chaotic_spiking": {
+              "parameters": {
+                "gCa": 1.2,
+                "gK": 2.0,
+                "gL": 0.5,
+                "VCa": 1.0,
+                "VK": -190.0,
+                "VL": -0.5,
+                "V1": -0.01,
+                "V2": 0.15,
+                "V3": 0.1,
+                "V4": 0.05,
+                "phi": 1.0,
+                "epsilon": 0.02,
+                "k": 1.0
+              },
+              "current_range": "I = 0.1-0.5",
+              "characteristics": "Irregular spiking with memristive coupling"
+            }
+          }
+        },
+        "fitzhugh_nagumo": {
+          "name": "FitzHugh-Nagumo Model",
+          "equations": "v̇ = v - v³/d - w + I; τẇ = cv + a - bw",
+          "firing_patterns": {
+            "excitable_regime": {
+              "parameters": {
+                "a": 0.08,
+                "b": 0.056,
+                "c": 0.064,
+                "d": 0.333,
+                "tau": 1.0
+              },
+              "current_range": "I < 0.2",
+              "characteristics": "Single spike response to stimulus",
+              "spike_threshold": "v ≈ 0.3"
+            },
+            "oscillatory_regime": {
+              "parameters": {
+                "a": 0.08,
+                "b": 0.056,
+                "c": 0.064,
+                "d": 0.333,
+                "tau": 1.0
+              },
+              "current_range": "I > 0.2",
+              "firing_rate": "Frequency ∝ √(I - I_critical)",
+              "characteristics": "Periodic spiking, frequency increases with current"
+            },
+            "bursting_regime": {
+              "parameters": {
+                "a": 0.7,
+                "b": 0.8,
+                "c": 3.0,
+                "d": 1.0,
+                "tau": 12.5
+              },
+              "current_range": "I = 0.35-0.7",
+              "burst_frequency": "0.5-5 Hz",
+              "intraburst_frequency": "10-50 Hz",
+              "characteristics": "Time-varying parameters enable bursting"
+            },
+            "fast_oscillations": {
+              "parameters": {
+                "a": -0.1,
+                "b": 0.01,
+                "c": 0.1,
+                "d": 1.0,
+                "tau": 0.1
+              },
+              "current_range": "I = 0.1-1.0",
+              "firing_rate": "50-200 Hz",
+              "characteristics": "High-frequency oscillations with fast recovery"
+            }
+          }
+        },
+        "hindmarsh_rose": {
+          "name": "Hindmarsh-Rose Model",
+          "equations": "ẋ = y - ax³ + bx² - z + I; ẏ = c - dx² - y; ż = r[s(x + x_R) - z]",
+          "firing_patterns": {
+            "periodic_spiking": {
+              "parameters": {
+                "a": 1.0,
+                "b": 3.0,
+                "c": 1.0,
+                "d": 5.0,
+                "r": 0.001,
+                "s": 4.0,
+                "x_R": -1.6
+              },
+              "current_range": "I = 1.0-1.2",
+              "firing_rate": "10-50 Hz",
+              "characteristics": "Regular periodic spikes"
+            },
+            "square_wave_bursting": {
+              "parameters": {
+                "a": 1.0,
+                "b": 3.0,
+                "c": 1.0,
+                "d": 5.0,
+                "r": 0.006,
+                "s": 4.0,
+                "x_R": -1.6
+              },
+              "current_range": "I = 1.2-3.0",
+              "burst_frequency": "1-10 Hz",
+              "intraburst_frequency": "50-200 Hz",
+              "spikes_per_burst": "3-8",
+              "characteristics": "Classical square-wave bursting pattern"
+            },
+            "elliptic_bursting": {
+              "parameters": {
+                "a": 1.0,
+                "b": 3.0,
+                "c": 1.0,
+                "d": 5.0,
+                "r": 0.01,
+                "s": 4.0,
+                "x_R": -1.6
+              },
+              "current_range": "I = 2.5-3.5",
+              "burst_frequency": "2-8 Hz",
+              "intraburst_frequency": "30-100 Hz",
+              "characteristics": "Elliptic-shaped bursts with variable duration"
+            },
+            "chaotic_bursting": {
+              "parameters": {
+                "a": 1.0,
+                "b": 3.0,
+                "c": 1.0,
+                "d": 5.0,
+                "r": 0.006,
+                "s": 4.0,
+                "x_R": -1.6
+              },
+              "current_range": "I = 3.3-4.0",
+              "characteristics": "Irregular bursting with chaotic inter-burst intervals"
+            },
+            "period_adding": {
+              "parameters": {
+                "a": 1.0,
+                "b": 3.0,
+                "c": 1.0,
+                "d": 5.0,
+                "r": 0.006,
+                "s": 4.0,
+                "x_R": -1.6
+              },
+              "current_values": {
+                "I_1.4": "Period-1 spiking",
+                "I_1.8": "Period-2 spiking",
+                "I_2.5": "Period-3 spiking",
+                "I_2.8": "Period-4 spiking"
+              },
+              "characteristics": "Period-adding sequence leading to chaos"
+            },
+            "mixed_mode": {
+              "parameters": {
+                "a": 1.3,
+                "b": 3.0,
+                "c": 1.0,
+                "d": 5.0,
+                "r": 0.005,
+                "s": 4.0,
+                "x_R": -1.6
+              },
+              "current_range": "I = 1.8-2.5",
+              "characteristics": "Alternating large and small amplitude oscillations"
+            }
+          }
+        },
+        "connor_stevens": {
+          "name": "Connor-Stevens Model",
+          "equations": "Extended Hodgkin-Huxley with A-current: I_A = g_A * m³ * h * (V - V_K)",
+          "firing_patterns": {
+            "type_I_excitability": {
+              "parameters": {
+                "g_Na": 120.0,
+                "g_K": 20.0,
+                "g_A": 47.7,
+                "g_L": 0.3,
+                "V_Na": 55.0,
+                "V_K": -72.0,
+                "V_L": -17.0,
+                "V_A": -75.0,
+                "Cm": 1.0
+              },
+              "current_range": "I > 6.2 μA/cm²",
+              "firing_rate": "Continuous from 0 Hz",
+              "characteristics": "A-current enables type I behavior"
+            },
+            "spike_frequency_adaptation": {
+              "parameters": {
+                "g_Na": 120.0,
+                "g_K": 20.0,
+                "g_A": 47.7,
+                "g_L": 0.3,
+                "V_Na": 55.0,
+                "V_K": -72.0,
+                "V_L": -17.0,
+                "V_A": -75.0,
+                "Cm": 1.0
+              },
+              "current_range": "I = 10-50 μA/cm²",
+              "adaptation_time": "50-200 ms",
+              "initial_rate": "50-100 Hz",
+              "adapted_rate": "10-30 Hz",
+              "characteristics": "A-current inactivation causes adaptation"
+            },
+            "delayed_firing": {
+              "parameters": {
+                "g_Na": 120.0,
+                "g_K": 20.0,
+                "g_A": 47.7,
+                "g_L": 0.3,
+                "V_Na": 55.0,
+                "V_K": -72.0,
+                "V_L": -17.0,
+                "V_A": -75.0,
+                "Cm": 1.0
+              },
+              "hyperpolarization": "V = -90 to -80 mV for 100-500 ms",
+              "delay_duration": "10-100 ms",
+              "characteristics": "A-current deinactivation required for firing"
+            }
+          }
+        },
+        "wang_buzsaki": {
+          "name": "Wang-Buzsáki Model",
+          "equations": "Modified HH with m_∞ = α_m/(α_m + β_m), faster kinetics",
+          "firing_patterns": {
+            "fast_spiking": {
+              "parameters": {
+                "g_Na": 35.0,
+                "g_K": 9.0,
+                "g_L": 0.1,
+                "V_Na": 55.0,
+                "V_K": -90.0,
+                "V_L": -65.0,
+                "Cm": 1.0,
+                "phi": 5.0
+              },
+              "current_range": "I > 0.5 μA/cm²",
+              "firing_rate": "0-200 Hz",
+              "spike_width": "0.3-0.8 ms",
+              "characteristics": "Fast spiking interneuron, minimal adaptation"
+            },
+            "gamma_oscillations": {
+              "parameters": {
+                "g_Na": 35.0,
+                "g_K": 9.0,
+                "g_L": 0.1,
+                "V_Na": 55.0,
+                "V_K": -90.0,
+                "V_L": -65.0,
+                "Cm": 1.0,
+                "phi": 5.0
+              },
+              "network_coupling": "g_syn = 0.1-1.0 mS/cm²",
+              "oscillation_frequency": "30-80 Hz",
+              "characteristics": "Network-driven gamma rhythms"
+            }
+          }
+        },
+        "adaptive_exponential": {
+          "name": "Adaptive Exponential Integrate-and-Fire (AdEx)",
+          "equations": "τ_m*dV/dt = -(V-V_L) + Δ_T*exp((V-V_T)/Δ_T) - R*w + R*I; τ_w*dw/dt = a*(V-V_L) - w",
+          "firing_patterns": {
+            "regular_spiking": {
+              "parameters": {
+                "C": 281.0,
+                "g_L": 30.0,
+                "E_L": -70.6,
+                "V_T": -50.4,
+                "Delta_T": 2.0,
+                "tau_w": 144.0,
+                "a": 4.0,
+                "b": 80.5
+              },
+              "units": "pF, nS, mV, mV, mV, ms, nS, pA",
+              "current_range": "I = 100-500 pA",
+              "firing_rate": "5-50 Hz",
+              "characteristics": "Regular spiking with adaptation"
+            },
+            "intrinsic_bursting": {
+              "parameters": {
+                "C": 104.0,
+                "g_L": 4.3,
+                "E_L": -70.0,
+                "V_T": -50.0,
+                "Delta_T": 2.0,
+                "tau_w": 20.0,
+                "a": -11.0,
+                "b": 67.0
+              },
+              "units": "pF, nS, mV, mV, mV, ms, nS, pA",
+              "current_range": "I = 50-200 pA",
+              "burst_frequency": "1-10 Hz",
+              "spikes_per_burst": "2-5",
+              "characteristics": "Initial burst then regular spiking"
+            },
+            "chattering": {
+              "parameters": {
+                "C": 104.0,
+                "g_L": 4.3,
+                "E_L": -70.0,
+                "V_T": -50.0,
+                "Delta_T": 2.0,
+                "tau_w": 20.0,
+                "a": -11.0,
+                "b": 67.0
+              },
+              "units": "pF, nS, mV, mV, mV, ms, nS, pA",
+              "current_range": "I = 200-400 pA",
+              "burst_frequency": "5-20 Hz",
+              "intraburst_frequency": "100-300 Hz",
+              "characteristics": "High-frequency burst firing"
+            },
+            "fast_spiking": {
+              "parameters": {
+                "C": 200.0,
+                "g_L": 10.0,
+                "E_L": -70.0,
+                "V_T": -50.0,
+                "Delta_T": 2.0,
+                "tau_w": 5.0,
+                "a": 0.0,
+                "b": 0.0
+              },
+              "units": "pF, nS, mV, mV, mV, ms, nS, pA",
+              "current_range": "I = 50-1000 pA",
+              "firing_rate": "10-200 Hz",
+              "characteristics": "No adaptation, fast spiking"
+            },
+            "delayed_accelerating": {
+              "parameters": {
+                "C": 200.0,
+                "g_L": 12.0,
+                "E_L": -70.0,
+                "V_T": -50.0,
+                "Delta_T": 2.0,
+                "tau_w": 300.0,
+                "a": -10.0,
+                "b": 0.0
+              },
+              "units": "pF, nS, mV, mV, mV, ms, nS, pA",
+              "current_range": "I = 100-300 pA",
+              "characteristics": "Slow onset, accelerating frequency"
+            },
+            "delayed_regular": {
+              "parameters": {
+                "C": 200.0,
+                "g_L": 10.0,
+                "E_L": -70.0,
+                "V_T": -50.0,
+                "Delta_T": 2.0,
+                "tau_w": 120.0,
+                "a": -11.0,
+                "b": 0.0
+              },
+              "units": "pF, nS, mV, mV, mV, ms, nS, pA",
+              "current_range": "I = 100-300 pA",
+              "characteristics": "Delayed onset then regular firing"
+            },
+            "transient": {
+              "parameters": {
+                "C": 144.0,
+                "g_L": 16.0,
+                "E_L": -70.0,
+                "V_T": -50.0,
+                "Delta_T": 2.0,
+                "tau_w": 40.0,
+                "a": 15.0,
+                "b": 120.0
+              },
+              "units": "pF, nS, mV, mV, mV, ms, nS, pA",
+              "current_range": "I = 100-500 pA",
+              "characteristics": "Single spike or brief burst then silence"
+            }
+          }
+        },
+        "leaky_integrate_fire": {
+          "name": "Leaky Integrate-and-Fire (LIF)",
+          "equations": "τ_m*dV/dt = -(V-V_rest) + R*I; if V ≥ V_thresh then V = V_reset",
+          "firing_patterns": {
+            "regular_integration": {
+              "parameters": {
+                "tau_m": 20.0,
+                "V_rest": -70.0,
+                "V_thresh": -54.0,
+                "V_reset": -80.0,
+                "R": 10.0
+              },
+              "units": "ms, mV, mV, mV, MΩ",
+              "current_range": "I > 1.6 nA (rheobase)",
+              "firing_rate": "F = 1/[τ_ref + τ_m*ln(R*I/(R*I - (V_thresh - V_rest)))]",
+              "characteristics": "Perfect integrator, constant threshold"
+            }
+          }
+        },
+        "quadratic_integrate_fire": {
+          "name": "Quadratic Integrate-and-Fire (QIF)",
+          "equations": "dV/dt = a₀(V-V_rest)(V-V_c) + I/C",
+          "firing_patterns": {
+            "type_I_canonical": {
+              "parameters": {
+                "a0": 1.0,
+                "V_rest": -70.0,
+                "V_c": -50.0,
+                "C": 1.0
+              },
+              "units": "ms⁻¹, mV, mV, μF/cm²",
+              "current_range": "I > I_critical = C*a₀*(V_c - V_rest)²/4",
+              "firing_rate": "F = (a₀/π) * √(I/C - I_critical/C)",
+              "characteristics": "Canonical type I model, continuous F-I curve"
+            },
+            "bistable_dynamics": {
+              "parameters": {
+                "a0": 0.5,
+                "V_rest": -65.0,
+                "V_c": -45.0,
+                "C": 1.0,
+                "tau_w": 100.0,
+                "a": 0.1,
+                "b": 5.0
+              },
+              "units": "ms⁻¹, mV, mV, μF/cm², ms, μS/cm², nA/cm²",
+              "current_range": "I in bistable region",
+              "characteristics": "With adaptation: stable rest or tonic firing"
+            }
+          }
+        }
+      },
+      "parameter_conversion_notes": {
+        "units_standardization": "Parameters given in standard physiological units unless otherwise specified",
+        "conductances": "mS/cm² = millisiemens per square centimeter",
+        "voltages": "mV = millivolts",
+        "currents": "μA/cm² = microamps per square centimeter, pA = picoamps, nA = nanoamps",
+        "capacitances": "μF/cm² = microfarads per square centimeter, pF = picofarads",
+        "time_constants": "ms = milliseconds",
+        "resistances": "MΩ = megaohms",
+        "temperature": "Most parameters at room temperature (20-25°C) unless specified"
+      },
+      "implementation_notes": {
+        "numerical_methods": "Use Runge-Kutta 4th order or similar for integration",
+        "time_step": "dt = 0.01-0.1 ms for most models, 0.001 ms for fast dynamics",
+        "initial_conditions": "Start near resting potential unless exploring multistability",
+        "parameter_sensitivity": "Small parameter changes can dramatically alter firing patterns",
+        "bifurcation_points": "Parameters often chosen near bifurcation boundaries for rich dynamics"
+      }
+    }
+  }

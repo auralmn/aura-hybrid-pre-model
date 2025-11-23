@@ -1,0 +1,679 @@
+{
+    "comprehensive_neuron_models": {
+      "description": "Complete guide to all major neuron models with firing patterns and parameter ranges",
+      "models": {
+        "1_izhikevich": {
+          "name": "Izhikevich Model",
+          "complexity": "Medium",
+          "parameters": 4,
+          "equations": "v' = 0.04v² + 5v + 140 - u + I; u' = a(bv - u); if v ≥ 30mV then v = c, u = u + d",
+          "total_patterns": 23,
+          "computational_efficiency": "Very High",
+          "biological_realism": "High",
+          "key_patterns": {
+            "regular_spiking": {
+              "a": 0.02,
+              "b": 0.2,
+              "c": -65,
+              "d": 6
+            },
+            "fast_spiking": {
+              "a": 0.1,
+              "b": 0.2,
+              "c": -65,
+              "d": 2
+            },
+            "bursting": {
+              "a": 0.02,
+              "b": 0.2,
+              "c": -50,
+              "d": 2
+            },
+            "chattering": {
+              "a": 0.02,
+              "b": 0.2,
+              "c": -50,
+              "d": 2
+            }
+          },
+          "applications": [
+            "Large-scale simulations",
+            "Neuromorphic computing",
+            "Real-time processing"
+          ]
+        },
+        "2_hodgkin_huxley": {
+          "name": "Hodgkin-Huxley Model",
+          "complexity": "High",
+          "parameters": "12+",
+          "equations": "Cm*dV/dt = -gNa*m³*h*(V-VNa) - gK*n⁴*(V-VK) - gL*(V-VL) + I",
+          "total_patterns": "Unlimited (continuous)",
+          "computational_efficiency": "Low",
+          "biological_realism": "Very High",
+          "firing_patterns": {
+            "type_II_excitability": {
+              "description": "Discontinuous frequency-current relationship",
+              "min_firing_rate": "40-80 Hz",
+              "characteristics": "Fixed frequency band, resonator-like"
+            },
+            "regular_spiking": {
+              "firing_rate": "10-100 Hz",
+              "adaptation": "Moderate",
+              "spike_width": "1-2 ms"
+            },
+            "refractory_behavior": {
+              "absolute_refractory": "1-2 ms",
+              "relative_refractory": "3-5 ms"
+            }
+          },
+          "key_parameters": {
+            "gNa_max": {
+              "range": "20-120 mS/cm²",
+              "effect": "Spike amplitude and rise rate"
+            },
+            "gK_max": {
+              "range": "5-36 mS/cm²",
+              "effect": "Repolarization and frequency"
+            },
+            "gL": {
+              "range": "0.1-0.3 mS/cm²",
+              "effect": "Resting potential"
+            },
+            "Cm": {
+              "range": "0.5-2.0 μF/cm²",
+              "effect": "Membrane time constant"
+            }
+          },
+          "applications": [
+            "Detailed biophysical studies",
+            "Ion channel research",
+            "Drug effects"
+          ]
+        },
+        "3_fitzhugh_nagumo": {
+          "name": "FitzHugh-Nagumo Model",
+          "complexity": "Medium",
+          "parameters": 4,
+          "equations": "v̇ = v - v³/3 - w + I; τẇ = v + a - bw",
+          "total_patterns": "8-12 major patterns",
+          "computational_efficiency": "High",
+          "biological_realism": "Medium",
+          "firing_patterns": {
+            "excitable_system": {
+              "description": "Relaxation oscillator behavior",
+              "threshold_behavior": "All-or-none response",
+              "spike_characteristics": "Nonlinear elevation followed by recovery"
+            },
+            "oscillatory_regimes": {
+              "small_I": "Excitable (single spike response)",
+              "medium_I": "Oscillatory (periodic spiking)",
+              "large_I": "High-frequency oscillations"
+            },
+            "traveling_waves": {
+              "description": "Supports propagating action potentials",
+              "wave_speed": "Parameter dependent",
+              "applications": "Cardiac modeling, neural wave propagation"
+            }
+          },
+          "key_parameters": {
+            "a": {
+              "range": "-0.5 to 1.0",
+              "effect": "Recovery variable offset"
+            },
+            "b": {
+              "range": "0.1 to 2.0",
+              "effect": "Recovery coupling strength"
+            },
+            "tau": {
+              "range": "1 to 100",
+              "effect": "Recovery time scale"
+            },
+            "I": {
+              "range": "-1 to 2",
+              "effect": "External drive strength"
+            }
+          },
+          "applications": [
+            "Cardiac modeling",
+            "Excitable media",
+            "Pattern formation"
+          ]
+        },
+        "4_morris_lecar": {
+          "name": "Morris-Lecar Model",
+          "complexity": "Medium",
+          "parameters": "8-10",
+          "equations": "Cm*dV/dt = -gCa*m∞(V)*(V-VCa) - gK*w*(V-VK) - gL*(V-VL) + I; dw/dt = φ*(w∞(V)-w)/τw(V)",
+          "total_patterns": "15+ patterns",
+          "computational_efficiency": "Medium",
+          "biological_realism": "High",
+          "firing_patterns": {
+            "type_I_excitability": {
+              "description": "Continuous frequency-current relationship",
+              "firing_rate": "0.1-200 Hz (current dependent)",
+              "characteristics": "Smooth F-I curve, integrator-like"
+            },
+            "type_II_excitability": {
+              "description": "With parameter changes, can show type II",
+              "firing_rate": "Fixed band oscillations",
+              "characteristics": "Discontinuous F-I curve"
+            },
+            "bursting_patterns": {
+              "square_wave_bursting": "High gCa, slow kinetics",
+              "elliptic_bursting": "Intermediate parameters",
+              "parabolic_bursting": "Low gCa values"
+            },
+            "oscillatory_patterns": {
+              "subthreshold_oscillations": "V1 < V2 parameter regime",
+              "limit_cycle_oscillations": "Supercritical Hopf bifurcation",
+              "mixed_mode_oscillations": "Near bifurcation points"
+            },
+            "chaotic_dynamics": {
+              "description": "With memristive modifications",
+              "patterns": "Chaotic spiking/bursting",
+              "parameter_regions": "Specific gCa and I ranges"
+            }
+          },
+          "key_parameters": {
+            "gCa": {
+              "range": "4-20 mS/cm²",
+              "effect": "Depolarizing current strength"
+            },
+            "gK": {
+              "range": "8-30 mS/cm²",
+              "effect": "Repolarizing current strength"
+            },
+            "VCa": {
+              "range": "100-120 mV",
+              "effect": "Calcium reversal potential"
+            },
+            "VK": {
+              "range": "-80 to -90 mV",
+              "effect": "Potassium reversal potential"
+            },
+            "V1": {
+              "range": "-10 to 10 mV",
+              "effect": "Ca activation midpoint"
+            },
+            "V2": {
+              "range": "10-20 mV",
+              "effect": "Ca activation steepness"
+            },
+            "V3": {
+              "range": "0-20 mV",
+              "effect": "K activation midpoint"
+            },
+            "V4": {
+              "range": "10-30 mV",
+              "effect": "K activation steepness"
+            }
+          },
+          "applications": [
+            "Barnacle muscle fiber",
+            "Generic oscillator",
+            "Bifurcation studies"
+          ]
+        },
+        "5_hindmarsh_rose": {
+          "name": "Hindmarsh-Rose Model",
+          "complexity": "High",
+          "parameters": 8,
+          "equations": "ẋ = y + φ(x) - z + I; ẏ = ψ(x) - y; ż = r[s(x-xR) - z]",
+          "total_patterns": "20+ patterns",
+          "computational_efficiency": "Medium",
+          "biological_realism": "High",
+          "firing_patterns": {
+            "spiking_patterns": {
+              "regular_spiking": "Low I values, stable dynamics",
+              "periodic_spiking": "Medium I, regular interspike intervals",
+              "chaotic_spiking": "High I or specific parameter ranges"
+            },
+            "bursting_patterns": {
+              "square_wave_bursts": "Classical parameter set",
+              "elliptic_bursts": "Modified a,b parameters",
+              "mixed_mode": "Transition regions"
+            },
+            "complex_dynamics": {
+              "period_adding": "Systematic parameter changes",
+              "period_doubling": "Route to chaos",
+              "homoclinic_bifurcations": "Burst termination mechanism"
+            },
+            "multi_scale_dynamics": {
+              "fast_subsystem": "x,y variables - spike generation",
+              "slow_subsystem": "z variable - adaptation/bursting",
+              "time_scale_ratio": "r parameter controls separation"
+            }
+          },
+          "key_parameters": {
+            "a": {
+              "range": "0.5-1.5",
+              "effect": "Cubic nonlinearity strength"
+            },
+            "b": {
+              "range": "2-4",
+              "effect": "Quadratic term coefficient"
+            },
+            "c": {
+              "range": "0.5-2",
+              "effect": "Recovery variable coupling"
+            },
+            "d": {
+              "range": "3-7",
+              "effect": "Recovery rate constant"
+            },
+            "r": {
+              "range": "0.001-0.1",
+              "effect": "Slow variable time scale"
+            },
+            "s": {
+              "range": "2-6",
+              "effect": "Adaptation strength"
+            },
+            "xR": {
+              "range": "-2 to -1",
+              "effect": "Adaptation reference"
+            },
+            "I": {
+              "range": "0-5",
+              "effect": "External current drive"
+            }
+          },
+          "applications": [
+            "Bursting neurons",
+            "Multi-timescale dynamics",
+            "Chaos studies"
+          ]
+        },
+        "6_connor_stevens": {
+          "name": "Connor-Stevens Model",
+          "complexity": "High",
+          "parameters": "15+",
+          "equations": "Extended HH with A-current: IA = gA*m³*h*(V-VK)",
+          "total_patterns": "12+ patterns",
+          "computational_efficiency": "Low",
+          "biological_realism": "Very High",
+          "firing_patterns": {
+            "type_I_excitability": {
+              "description": "Due to A-current presence",
+              "firing_rate": "Continuous from 0 Hz",
+              "characteristics": "Smooth F-I curve, no discontinuous jump"
+            },
+            "spike_frequency_adaptation": {
+              "mechanism": "A-current inactivation",
+              "time_course": "Gradual decrease over 100s of ms",
+              "recovery": "A-current deinactivation during rest"
+            },
+            "delayed_firing": {
+              "description": "After hyperpolarization",
+              "mechanism": "A-current deinactivation required",
+              "delay_range": "10-100 ms"
+            },
+            "rebound_responses": {
+              "post_inhibitory_rebound": "After prolonged hyperpolarization",
+              "burst_generation": "With additional Ca2+ currents",
+              "mechanism": "Deinactivation of transient currents"
+            }
+          },
+          "key_parameters": {
+            "gA_max": {
+              "range": "10-50 mS/cm²",
+              "effect": "A-current strength"
+            },
+            "gNa_max": {
+              "range": "30-100 mS/cm²",
+              "effect": "Sodium current (faster than HH)"
+            },
+            "gK_max": {
+              "range": "10-40 mS/cm²",
+              "effect": "Delayed rectifier K+"
+            },
+            "VA_half": {
+              "range": "-40 to -20 mV",
+              "effect": "A-current activation midpoint"
+            },
+            "tau_A": {
+              "range": "1-20 ms",
+              "effect": "A-current time constant"
+            }
+          },
+          "applications": [
+            "Detailed cortical modeling",
+            "A-current studies",
+            "Type I/II transitions"
+          ]
+        },
+        "7_wang_buzsaki": {
+          "name": "Wang-Buzsáki Model",
+          "complexity": "High",
+          "parameters": "10+",
+          "equations": "Modified HH with m∞ = αm/(αm + βm), faster kinetics",
+          "total_patterns": "8+ patterns",
+          "computational_efficiency": "Medium",
+          "biological_realism": "High",
+          "firing_patterns": {
+            "type_I_excitability": {
+              "description": "Continuous F-I relationship",
+              "firing_rate": "0-200 Hz",
+              "characteristics": "Smooth frequency onset"
+            },
+            "gamma_oscillations": {
+              "frequency_range": "30-80 Hz",
+              "mechanism": "Fast inhibitory networks",
+              "synchronization": "Network-dependent"
+            },
+            "fast_spiking": {
+              "max_rate": "200+ Hz",
+              "spike_width": "0.3-0.8 ms",
+              "adaptation": "Minimal"
+            }
+          },
+          "key_parameters": {
+            "gNa": {
+              "range": "30-40 mS/cm²",
+              "effect": "Fast Na current"
+            },
+            "gK": {
+              "range": "8-12 mS/cm²",
+              "effect": "K delayed rectifier"
+            },
+            "VNa": {
+              "range": "50-60 mV",
+              "effect": "Na reversal potential"
+            },
+            "VK": {
+              "range": "-85 to -95 mV",
+              "effect": "K reversal potential"
+            }
+          },
+          "applications": [
+            "Interneuron modeling",
+            "Gamma rhythms",
+            "Fast inhibition"
+          ]
+        },
+        "8_leaky_integrate_fire": {
+          "name": "Leaky Integrate-and-Fire (LIF)",
+          "complexity": "Low",
+          "parameters": 3,
+          "equations": "τm*dV/dt = -(V-Vrest) + R*I; if V ≥ Vthresh then V = Vreset",
+          "total_patterns": 1,
+          "computational_efficiency": "Highest",
+          "biological_realism": "Low",
+          "firing_patterns": {
+            "linear_integration": {
+              "description": "Perfect integrator below threshold",
+              "firing_rate": "Input-dependent",
+              "characteristics": "No adaptation, constant threshold"
+            }
+          },
+          "key_parameters": {
+            "tau_m": {
+              "range": "5-50 ms",
+              "effect": "Membrane time constant"
+            },
+            "Vthresh": {
+              "range": "-60 to -40 mV",
+              "effect": "Firing threshold"
+            },
+            "Vreset": {
+              "range": "-80 to -60 mV",
+              "effect": "Post-spike reset"
+            }
+          },
+          "applications": [
+            "Rate-based models",
+            "Large networks",
+            "Theoretical studies"
+          ]
+        },
+        "9_exponential_integrate_fire": {
+          "name": "Exponential Integrate-and-Fire (EIF)",
+          "complexity": "Low-Medium",
+          "parameters": 4,
+          "equations": "τm*dV/dt = -(V-VL) + ΔT*exp((V-VT)/ΔT) + R*I",
+          "total_patterns": "5+ patterns",
+          "computational_efficiency": "High",
+          "biological_realism": "Medium-High",
+          "firing_patterns": {
+            "exponential_approach": {
+              "description": "Exponential approach to threshold",
+              "characteristics": "More realistic spike initiation than LIF"
+            },
+            "type_I_excitability": {
+              "description": "Continuous F-I curve",
+              "firing_rate": "Smooth increase from rheobase"
+            }
+          },
+          "key_parameters": {
+            "VT": {
+              "range": "-55 to -45 mV",
+              "effect": "Threshold potential"
+            },
+            "DeltaT": {
+              "range": "1-5 mV",
+              "effect": "Spike sharpness"
+            },
+            "tau_m": {
+              "range": "10-30 ms",
+              "effect": "Membrane time constant"
+            },
+            "VL": {
+              "range": "-75 to -65 mV",
+              "effect": "Leak potential"
+            }
+          },
+          "applications": [
+            "Realistic spiking",
+            "Cortical modeling",
+            "Efficient simulation"
+          ]
+        },
+        "10_quadratic_integrate_fire": {
+          "name": "Quadratic Integrate-and-Fire (QIF)",
+          "complexity": "Low-Medium",
+          "parameters": 3,
+          "equations": "dV/dt = a₀(V-Vrest)(V-Vc) + R*I",
+          "total_patterns": "8+ patterns",
+          "computational_efficiency": "High",
+          "biological_realism": "Medium",
+          "firing_patterns": {
+            "type_I_excitability": {
+              "description": "Canonical type I model",
+              "firing_rate": "Continuous from 0 Hz"
+            },
+            "bistability": {
+              "description": "With adaptation variable",
+              "patterns": "Stable rest or tonic firing"
+            },
+            "chaotic_dynamics": {
+              "description": "With constant input",
+              "conditions": "Specific parameter ranges"
+            }
+          },
+          "key_parameters": {
+            "a0": {
+              "range": "0.1-2.0",
+              "effect": "Quadratic nonlinearity strength"
+            },
+            "Vc": {
+              "range": "-60 to -40 mV",
+              "effect": "Critical voltage"
+            },
+            "Vrest": {
+              "range": "-80 to -60 mV",
+              "effect": "Resting potential"
+            }
+          },
+          "applications": [
+            "Type I neurons",
+            "Theoretical analysis",
+            "Canonical models"
+          ]
+        },
+        "11_adaptive_exponential": {
+          "name": "Adaptive Exponential Integrate-and-Fire (AdEx)",
+          "complexity": "Medium",
+          "parameters": 6,
+          "equations": "τm*dV/dt = -(V-VL) + ΔT*exp((V-VT)/ΔT) - R*w + R*I; τw*dw/dt = a*(V-VL) - w",
+          "total_patterns": "20+ patterns",
+          "computational_efficiency": "High",
+          "biological_realism": "High",
+          "firing_patterns": {
+            "regular_spiking": {
+              "a": "small",
+              "b": "large",
+              "description": "Adapting"
+            },
+            "bursting": {
+              "a": "large",
+              "b": "small",
+              "description": "Initial burst then adaptation"
+            },
+            "delayed_accelerating": {
+              "a": "small",
+              "b": "small",
+              "description": "Slow onset"
+            },
+            "delayed_regular": {
+              "a": "negative",
+              "description": "Delayed onset then regular"
+            },
+            "transient": {
+              "a": "large",
+              "b": "large",
+              "description": "Single spike"
+            },
+            "continuous_spiking": {
+              "description": "No adaptation"
+            }
+          },
+          "key_parameters": {
+            "a": {
+              "range": "-5 to 15 nS",
+              "effect": "Subthreshold adaptation"
+            },
+            "b": {
+              "range": "0-200 pA",
+              "effect": "Spike-triggered adaptation"
+            },
+            "tau_w": {
+              "range": "20-500 ms",
+              "effect": "Adaptation time constant"
+            },
+            "VT": {
+              "range": "-55 to -45 mV",
+              "effect": "Threshold"
+            },
+            "DeltaT": {
+              "range": "1-5 mV",
+              "effect": "Spike sharpness"
+            }
+          },
+          "applications": [
+            "Cortical neurons",
+            "Diverse firing patterns",
+            "Efficient detailed modeling"
+          ]
+        }
+      },
+      "model_comparison": {
+        "complexity_ranking": [
+          "Leaky Integrate-and-Fire (Simplest)",
+          "Exponential Integrate-and-Fire",
+          "Quadratic Integrate-and-Fire",
+          "Izhikevich",
+          "FitzHugh-Nagumo",
+          "Adaptive Exponential",
+          "Morris-Lecar",
+          "Wang-Buzsáki",
+          "Hindmarsh-Rose",
+          "Connor-Stevens",
+          "Hodgkin-Huxley (Most Complex)"
+        ],
+        "efficiency_ranking": [
+          "Leaky Integrate-and-Fire (Fastest)",
+          "Quadratic Integrate-and-Fire",
+          "Exponential Integrate-and-Fire",
+          "Adaptive Exponential",
+          "Izhikevich",
+          "FitzHugh-Nagumo",
+          "Morris-Lecar",
+          "Wang-Buzsáki",
+          "Hindmarsh-Rose",
+          "Connor-Stevens",
+          "Hodgkin-Huxley (Slowest)"
+        ],
+        "realism_ranking": [
+          "Hodgkin-Huxley (Most Realistic)",
+          "Connor-Stevens",
+          "Wang-Buzsáki",
+          "Morris-Lecar",
+          "Hindmarsh-Rose",
+          "Adaptive Exponential",
+          "Izhikevich",
+          "Exponential Integrate-and-Fire",
+          "FitzHugh-Nagumo",
+          "Quadratic Integrate-and-Fire",
+          "Leaky Integrate-and-Fire (Least Realistic)"
+        ]
+      },
+      "firing_pattern_categories": {
+        "excitability_types": {
+          "Type_I": {
+            "models": [
+              "Morris-Lecar",
+              "Connor-Stevens",
+              "Wang-Buzsáki",
+              "Izhikevich (some)",
+              "AdEx",
+              "QIF"
+            ],
+            "characteristics": "Continuous F-I curve, can fire at arbitrarily low frequencies",
+            "bifurcation": "Saddle-node on invariant circle (SNIC)",
+            "applications": "Integrator neurons, working memory"
+          },
+          "Type_II": {
+            "models": [
+              "Hodgkin-Huxley",
+              "Izhikevich (some)",
+              "Morris-Lecar (some)"
+            ],
+            "characteristics": "Discontinuous F-I curve, fixed frequency band",
+            "bifurcation": "Hopf bifurcation",
+            "applications": "Oscillator neurons, resonance"
+          }
+        },
+        "temporal_patterns": {
+          "Regular_Spiking": [
+            "All models support"
+          ],
+          "Bursting": [
+            "Hindmarsh-Rose",
+            "Izhikevich",
+            "Morris-Lecar",
+            "AdEx"
+          ],
+          "Chattering": [
+            "Izhikevich",
+            "Hindmarsh-Rose",
+            "Modified HH"
+          ],
+          "Fast_Spiking": [
+            "Wang-Buzsáki",
+            "Connor-Stevens",
+            "Izhikevich"
+          ],
+          "Adapting": [
+            "AdEx",
+            "Connor-Stevens",
+            "Izhikevich"
+          ],
+          "Chaotic": [
+            "Hindmarsh-Rose",
+            "Morris-Lecar (memristive)",
+            "QIF"
+          ]
+        }
+      }
+    }
+  }
