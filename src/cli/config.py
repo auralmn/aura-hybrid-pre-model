@@ -1,5 +1,5 @@
 from ast import Dict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List
 
 from base.brain_zones import BrainZoneConfig
@@ -10,16 +10,25 @@ from core.neuron_factory import NeuronFactory
 
 @dataclass
 class Config:
-    name: str
-    new: bool
-    layers_config: BaseLayerContainerConfig = BaseLayerContainerConfig()
-    brain_zones_config: List[BrainZoneConfig]
-    save_path: str
-    checkpoint_path: str
-    tmp_path: str
-    log_path: str
-    
+    """Configuration for the Aura brain system.
 
+    Provides default values for all fields to maintain backward compatibility.
+    """
+    name: str = "AURA"
+    new: bool = False
+    layers_config: BaseLayerContainerConfig = field(default_factory=BaseLayerContainerConfig)
+    brain_zones_config: List[BrainZoneConfig] = field(default_factory=list)
+    save_path: str = ""
+    checkpoint_path: str = ""
+    tmp_path: str = ""
+    log_path: str = ""
+
+# Alias for backward compatibility – many modules import BrainConfig
+class BrainConfig(Config):
+    """Alias for Config to keep existing import statements working."""
+    pass
+
+# Default configuration instance used throughout the codebase
 default_config = Config(
     name="AURA",
     new=False,
@@ -28,5 +37,5 @@ default_config = Config(
     save_path="",
     checkpoint_path="",
     tmp_path="",
-    log_path=""
+    log_path="",
 )

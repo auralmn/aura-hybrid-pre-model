@@ -491,8 +491,34 @@ class EnhancedBrain:
         print("=" * 60)
 
 # Backwards-compatible alias for tests expecting `Brain`
+from cli.config import BrainConfig, Config
+
 class Brain(EnhancedBrain):
-    pass
+    """Backwards compatible Brain class.
+
+    Accepts a ``BrainConfig`` (or ``Config``) instance as used in older code and
+    forwards the relevant parts to ``EnhancedBrain``.
+    """
+
+    def __init__(self, config: Config):
+        # ``config`` may be a ``BrainConfig`` alias; both have the same fields.
+        # Extract layer configuration and brain zone configurations.
+        layers_cfg = getattr(config, "layers_config", None)
+        zones_cfg = getattr(config, "brain_zones_config", [])
+        # Convert list of BrainZoneConfig objects to a dict keyed by name if needed.
+        zones_dict = {}
+        for zone in zones_cfg:
+            # Assume each zone has a ``name`` attribute; fallback to its class name.
+            zone_name = getattr(zone, "name", zone.__class__.__name__)
+            zones_dict[zone_name] = zone
+        # Initialise the parent class with defaults for other parameters.
+        super().__init__(
+            config=layers_cfg,
+            zones=zones_dict,
+            d_model=1024,
+            use_neuromorphic=True,
+            processing_mode=ProcessingMode.NEUROMORPHIC,
+        )
 
 # --- Liquid MoE Integration Components ---
 

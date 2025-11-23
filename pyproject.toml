@@ -19,6 +19,7 @@ dependencies = [
   "torchvision",
   "scipy>=1.16.3",
   "datasets>=4.4.1",
+  "matplotlib>=3.10.7",
 ]
 
 [tool.setuptools]
