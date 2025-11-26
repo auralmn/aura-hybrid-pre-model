@@ -19,34 +19,34 @@ import os
 import asyncio
 
 # Your existing imports
-from core.layers_factory import LayersFactory
-from core.neuron_factory import NeuronFactory
-from base.snn_layers import BaseLayerConfig, BaseLayerContainer, BaseLayerContainerConfig
-from base.neuron import NeuronalState
-from base.snn_brain_zones import BrainZone, BrainZoneConfig
-from base.brain_zone_factory import BrainZoneFactory
+from src.core.layers_factory import LayersFactory
+from src.core.neuron_factory import NeuronFactory
+from src.base.snn_layers import BaseLayerConfig, BaseLayerContainer, BaseLayerContainerConfig
+from src.base.neuron import NeuronalState
+from src.base.snn_brain_zones import BrainZone, BrainZoneConfig
+from src.base.brain_zone_factory import BrainZoneFactory
 
 # Enhanced imports
-from base.snn_brain_zones import (
+from src.base.snn_brain_zones import (
     NeuromorphicBrainZone,
     BrainZoneType,
 )
-from base.snn_brain_stats import BrainStats, StatsCollector
-from base.snn_processor import NeuromorphicProcessor, ContentRouter, ProcessingMode
-from base.snn_layers import BaseLayerFactory, create_neuromorphic_layer_stack
-from base.events import EventBus
+from src.base.snn_brain_stats import BrainStats, StatsCollector
+from src.base.snn_processor import NeuromorphicProcessor, ContentRouter, ProcessingMode
+from src.base.snn_layers import BaseLayerFactory, create_neuromorphic_layer_stack
+from src.base.events import EventBus
 
 # Liquid MoE and Learning Components
-from core.liquid_moe import LiquidMoERouter
-from core.experts import ExpertNLMSHead, NLMSExpertAdapter
-from training.hebbian_layer import OjaLayer
-from training.optimized_whitener import OptimizedWhitener
-from encoders.fast_hash_embedder import FastHashEmbedder
-from training.memory_manager import maybe_empty_cuda_cache
+from src.core.liquid_moe import LiquidMoERouter
+from src.core.experts import ExpertNLMSHead, NLMSExpertAdapter
+from src.training.hebbian_layer import OjaLayer
+from src.training.optimized_whitener import OptimizedWhitener
+from src.encoders.fast_hash_embedder import FastHashEmbedder
+from src.training.memory_manager import maybe_empty_cuda_cache
 
 # Optional continuous learning orchestrator
 try:
-    from services.continuous_learning import (
+    from src.services.continuous_learning import (
         ContinuousLearningOrchestrator,
         create_default_feeds,
         RSSFeedConfig,
@@ -491,7 +491,7 @@ class EnhancedBrain:
         print("=" * 60)
 
 # Backwards-compatible alias for tests expecting `Brain`
-from cli.config import BrainConfig, Config
+from src.cli.config import BrainConfig, Config
 
 class Brain(EnhancedBrain):
     """Backwards compatible Brain class.

@@ -23,10 +23,10 @@ import time
 import torch
 import numpy as np
 
-from base.events import EventBus
-from base.snn_processor import NeuromorphicProcessor
+from src.base.events import EventBus
+from src.base.snn_processor import NeuromorphicProcessor
 from encoders.fast_hash_embedder import FastHashEmbedder
-from training.stdp_learning import STDPLearner
+from src.training.stdp_learning import STDPLearner
 
 class FeedCategory(Enum):
     SCIENCE = "science"

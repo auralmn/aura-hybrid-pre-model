@@ -129,12 +129,20 @@ class LiquidGatingNetwork:
         async with self._lock:
             h = self.cell.step(x, self.energy)
             logits = (self.Wg @ h) + self.bg
-            logits = self._apply_usage_bias(logits)
+            
+            # Apply usage bias (if enabled)
+            if self.usage_beta > 0:
+                logits = self._apply_usage_bias(logits)
+            
+            # CRITICAL FIX: Apply temperature scaling with attn_gain
+            # Design choice: high prosody (high attn_gain) -> lower temp -> sharper distribution (focused)
+            #                low prosody (low attn_gain) -> higher temp -> flatter distribution (exploratory)
             temp = max(0.2, self.temperature / max(1e-6, attn_gain))
-            probs = softmax(logits) # removed temp arg, softmax doesn't support it directly in scipy, handled by scaling logits if needed
-            # Or implement custom softmax with temp:
-            # logits = logits / temp
-            # probs = np.exp(logits - np.max(logits)) / np.sum(np.exp(logits - np.max(logits)))
+            logits_scaled = logits / temp
+            
+            # Softmax with temperature applied
+            probs = np.exp(logits_scaled - np.max(logits_scaled))
+            probs = probs / np.sum(probs)
             
             k = max(1, min(self.top_k, self.n_experts))
             topk_idx = np.argpartition(probs, -k)[-k:]

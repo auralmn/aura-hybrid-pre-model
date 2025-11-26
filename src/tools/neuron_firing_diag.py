@@ -6,8 +6,8 @@ Run manually to verify spiking and end-to-end routing with adjusted parameters.
 
 import torch
 
-from base.neuron import AdaptiveLIFNeuron
-from base.events import EventBus
+from src.base.neuron import AdaptiveLIFNeuron
+from src.base.events import EventBus
 
 # Optional brain-level test
 try:

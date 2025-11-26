@@ -9,7 +9,7 @@ wheels/
 # Virtual environments
 .venv
 LiquidMoe/
-old/
+old2/
 .pycache
 .pytest_cache/
 .cursor

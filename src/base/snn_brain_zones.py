@@ -11,11 +11,11 @@ from enum import Enum
 import torch
 import torch.nn as nn
 
-from base.layers import BaseLayer, BaseLayerConfig, BaseLayerContainerConfig
-from maths.addition_linear import AdditionLinear
-from maths.additive_receptance import AdditiveReceptance
-from base.neuron import AdaptiveLIFNeuron, LearnableSurrogateGradient, NeuronalState, IzhikevichNeuron, AdExNeuron, load_izhikevich_patterns_json
-from base.events import EventBus
+from src.base.layers import BaseLayer, BaseLayerConfig, BaseLayerContainerConfig
+from src.maths.addition_linear import AdditionLinear
+from src.maths.additive_receptance import AdditiveReceptance
+from src.base.neuron import AdaptiveLIFNeuron, LearnableSurrogateGradient, NeuronalState, IzhikevichNeuron, AdExNeuron, load_izhikevich_patterns_json
+from src.base.events import EventBus
 
 import csv
 
@@ -1022,7 +1022,7 @@ class BrainZone:
 
 """
 # Import the basic layer implementation for compatibility
-from base.layers import BaseLayerImplementation
+from src.base.layers import BaseLayerImplementation
 
 # Helper functions for easy zone creation
 def create_prefrontal_cortex(d_model: int = 512, max_neurons: int = 512, 

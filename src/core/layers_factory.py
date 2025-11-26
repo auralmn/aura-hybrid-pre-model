@@ -1,6 +1,6 @@
 from typing import Dict, Any
-from base import BaseLayerContainerConfig, BaseLayerContainer
-from base.layers import BaseLayer, BaseLayerConfig, BaseLayerImplementation
+from src.base import BaseLayerContainerConfig, BaseLayerContainer
+from src.base.layers import BaseLayer, BaseLayerConfig, BaseLayerImplementation
 
 class LayersFactory:
     def __init__(self, config: BaseLayerContainerConfig):

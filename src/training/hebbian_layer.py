@@ -4,8 +4,8 @@ from typing import Tuple, Dict, Optional, Any
 import logging
 
 # Use optimized implementations
-from training.memory_pool import get_pooled_array, return_pooled_array
-from training.optimized_whitener import OptimizedWhitener
+from src.training.memory_pool import get_pooled_array, return_pooled_array
+from src.training.optimized_whitener import OptimizedWhitener
 
 logger = logging.getLogger(__name__)
 
