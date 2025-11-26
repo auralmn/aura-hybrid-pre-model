@@ -165,6 +165,35 @@ class HippocampalTransformerTrainer:
                 print(f"🌙 Entering SLEEP phase at step {self.global_step}")
         elif self.phase == "sleep":
             pass
+
+    # If your trainer doesn't have reverse replay, add this:
+    def train_step_sleep_with_direction(trainer, reverse=False):
+        """Sleep step with forward or backward replay"""
+        if len(trainer.replay_buffer) == 0:
+            return None
+        
+        # Sample batch
+        samples = trainer.replay_buffer.sample(config.batch_size)
+        
+        if reverse:
+            # Backward replay: reverse the sequence order
+            samples = samples[::-1]
+        
+        # Stack into batch
+        input_ids = torch.stack([s[0] for s in samples]).to(device)
+        labels = torch.stack([s[1] for s in samples]).to(device)
+        
+        # Forward pass (no memory creation during sleep)
+        logits, _ = model(input_ids)
+        loss = nn.CrossEntropyLoss()(
+            logits.view(-1, config.vocab_size),
+            labels.view(-1)
+        )
+        
+        return loss
+
+  
+
             
     def should_sleep(self) -> bool:
         """Check if sleep phase should start."""

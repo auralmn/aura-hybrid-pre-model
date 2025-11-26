@@ -8,6 +8,11 @@ Copy each section into separate Colab cells for easy execution.
 # ============================================================
 # CELL 1: Setup & Dependencies
 # ============================================================
+!git clone https://github.com/auralmn/aura-hybrid-pre-model.git
+!git checkout master
+!cd aura-hybrid-pre-model
+!pip install -e .
+
 import torch
 import torch.nn as nn
 from datasets import load_dataset
