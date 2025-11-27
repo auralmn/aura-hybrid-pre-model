@@ -14,29 +14,25 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 
-from base.events import EventBus
-from base.snn_processor import NeuromorphicProcessor, ProcessingMode
-from base.snn_brain_zones import (
+from src.base.events import EventBus
+from src.base.snn_processor import NeuromorphicProcessor, ProcessingMode
+from src.base.snn_brain_zones import (
     NeuromorphicBrainZone,
     BrainZoneType,
     BrainZoneConfig,
 )
-from base.snn_brain_stats import BrainStats
+from src.base.snn_brain_stats import BrainStats
 
 try:
-    from services.continuous_learning import (
+    from src.services.continuous_learning import (
         ContinuousLearningOrchestrator,
         create_default_feeds,
         RSSFeedConfig,
-        FeedCategory,
-        ProcessingPriority,
     )
 except Exception:  # optional dependency import
     ContinuousLearningOrchestrator = None  # type: ignore
     create_default_feeds = None  # type: ignore
     RSSFeedConfig = None  # type: ignore
-    FeedCategory = None  # type: ignore
-    ProcessingPriority = None  # type: ignore
 
 
 class NeuromorphicBrainSystem:
