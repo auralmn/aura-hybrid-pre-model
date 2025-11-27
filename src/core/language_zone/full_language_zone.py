@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Dict
 
 from src.core.language_zone.prosody_attention import ProsodyAttentionBridge
 from src.core.language_zone.gif_neuron import GIFNeuron
@@ -13,7 +13,6 @@ class FullLanguageZone(nn.Module):
     def __init__(self, config: BrainZoneConfig, vocab_size: int):
         super().__init__()
         self.config = config
-        self.vocab_size = vocab_size
         self.embed_dim = config.d_model
         self.hidden_dim = config.max_neurons 
         self.moe_hidden_dim = 64
@@ -22,93 +21,63 @@ class FullLanguageZone(nn.Module):
         
         self.prosody_attention = ProsodyAttentionBridge(k_winners=self.top_k)
         self.encoder = GIFNeuron(self.embed_dim, self.hidden_dim, L=16)
-        
-        self.spike_to_continuous = SpikeToContinuousBridge(
-            spike_dim=self.hidden_dim, output_dim=self.moe_hidden_dim, encoding='rate'
-        )
-        
+        self.spike_to_continuous = SpikeToContinuousBridge(self.hidden_dim, self.moe_hidden_dim, 'rate')
         self.experts = nn.ModuleDict({
-            f'expert_{i}': SNNExpert(
-                input_dim=self.moe_hidden_dim,
-                hidden_dim=self.hidden_dim // 2,
-                output_dim=self.moe_hidden_dim
-            ) for i in range(self.num_experts)
+            f'expert_{i}': SNNExpert(self.moe_hidden_dim, self.hidden_dim // 2, self.moe_hidden_dim)
+            for i in range(self.num_experts)
         })
-        
-        self.moe_router = LiquidMoERouter(
-            in_dim=self.moe_hidden_dim, hidden_dim=64,
-            num_experts=self.num_experts, top_k=self.top_k
-        )
-        
-        self.continuous_to_spike = ContinuousToSpikeBridge(
-            input_dim=self.moe_hidden_dim, spike_dim=self.hidden_dim, encoding='poisson'
-        )
-        
+        self.moe_router = LiquidMoERouter(self.moe_hidden_dim, 64, self.num_experts, self.top_k)
+        self.continuous_to_spike = ContinuousToSpikeBridge(self.moe_hidden_dim, self.hidden_dim, 'poisson')
         self.decoder = GIFNeuron(self.hidden_dim, self.embed_dim, L=16)
         self.output_norm = nn.LayerNorm(self.embed_dim)
     
-    def forward(self, 
-                inputs_embeds: torch.Tensor, 
-                input_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Forward pass (Stateless & Deterministic).
-        """
-        batch_size, seq_len, _ = inputs_embeds.shape
+    def forward(self, inputs_embeds: torch.Tensor, input_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
+        batch, seq, _ = inputs_embeds.shape
         device = inputs_embeds.device
         
-        # 1. Prosody Modulation (Deterministic)
+        # 1. Prosody (Deterministic)
         if input_ids is not None:
             attention_gains, _ = self.prosody_attention(input_ids)
-            modulated_input = inputs_embeds * attention_gains.unsqueeze(-1)
+            inputs = inputs_embeds * attention_gains.unsqueeze(-1)
         else:
-            modulated_input = inputs_embeds
+            inputs = inputs_embeds
             attention_gains = None
 
-        # 2. Encode to Spikes (Stateless)
-        spikes_enc, _ = self.encoder(modulated_input, state=None)
+        # 2. Encode (Stateless)
+        spikes_enc, _ = self.encoder(inputs, state=None)
         
-        # 3. Prepare for MoE Routing
-        spikes_flat = spikes_enc.reshape(batch_size * seq_len, 1, self.hidden_dim)
-        continuous_flat = self.spike_to_continuous(spikes_flat)
+        # 3. Route (Stateless)
+        spikes_flat = spikes_enc.reshape(batch * seq, 1, self.hidden_dim)
+        continuous = self.spike_to_continuous(spikes_flat)
         
-        # 4. Route (Liquid MoE - Stateless)
         flat_gains = attention_gains.view(-1, 1) if attention_gains is not None else None
-        route_out = self.moe_router(continuous_flat, attn_gain=flat_gains)
+        route_out = self.moe_router(continuous, attn_gain=flat_gains)
         
-        topk_indices = route_out['indices']
-        topk_weights = route_out['weights']
+        indices = route_out['indices']
+        weights = route_out['weights']
         
-        # 5. Sparse Expert Execution
-        expert_outputs = torch.zeros_like(continuous_flat)
-        
+        # 4. Sparse Expert Exec (Stateless Experts)
+        output_flat = torch.zeros_like(continuous)
         for i in range(self.num_experts):
-            # Identify which tokens selected this expert
-            selection_mask = (topk_indices == i)
-            token_mask = selection_mask.any(dim=1)
+            mask = (indices == i).any(dim=1)
+            if not mask.any(): continue
             
-            if not token_mask.any():
-                continue
-                
-            active_indices = torch.where(token_mask)[0]
-            active_inputs = continuous_flat[active_indices]
+            active_idx = torch.where(mask)[0]
+            active_in = continuous[active_idx]
             
-            active_out = self.experts[f'expert_{i}'].predict(active_inputs)
+            # Predict calls forward(state=None) internally
+            active_out = self.experts[f'expert_{i}'].predict(active_in)
             
-            active_weights = (topk_weights[active_indices] * selection_mask[active_indices].float()).sum(dim=1, keepdim=True)
-            weighted_out = active_out * active_weights
+            # Weighted combination
+            w_sum = (weights[active_idx] * (indices[active_idx] == i).float()).sum(dim=1, keepdim=True)
+            output_flat.index_add_(0, active_idx, active_out * w_sum)
             
-            expert_outputs.index_add_(0, active_indices, weighted_out)
-            
-        # 6. Convert back to Spikes
-        spikes_moe = self.continuous_to_spike(expert_outputs)
-        spikes_moe = spikes_moe.view(batch_size, seq_len, -1, self.hidden_dim)
-        spikes_moe_avg = spikes_moe.mean(dim=2)
+        # 5. Decode (Stateless)
+        spikes_moe = self.continuous_to_spike(output_flat)
+        spikes_moe = spikes_moe.view(batch, seq, -1, self.hidden_dim).mean(dim=2)
         
-        # 7. Decode
         if attention_gains is not None:
-            spikes_moe_avg = spikes_moe_avg * attention_gains.unsqueeze(-1)
+            spikes_moe = spikes_moe * attention_gains.unsqueeze(-1)
             
-        decoded, _ = self.decoder(spikes_moe_avg, state=None)
-        
-        # 8. Output Norm
+        decoded, _ = self.decoder(spikes_moe, state=None)
         return self.output_norm(decoded)
