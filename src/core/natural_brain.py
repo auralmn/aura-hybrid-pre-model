@@ -1,5 +1,5 @@
 """
-Natural Brain Architecture (Memory Optimized).
+Natural Brain Architecture.
 """
 
 import torch
@@ -21,11 +21,13 @@ class NaturalBrain(nn.Module):
                  d_model: int, 
                  vocab_size: int,
                  zone_configs: Dict[str, BrainZoneConfig],
-                 device: str = 'cuda'):
+                 device: str = 'cuda',
+                 use_checkpointing: bool = False): # <--- NEW FLAG
         super().__init__()
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         self.d_model = d_model
         self.vocab_size = vocab_size
+        self.use_checkpointing = use_checkpointing
         
         region_names = list(zone_configs.keys())
         
@@ -76,7 +78,7 @@ class NaturalBrain(nn.Module):
         }
         routed_signals, routing_probs = self.thalamus(x, limbic_state=thalamus_mod)
         
-        # C. Cortex (With Gradient Checkpointing)
+        # C. Cortex
         cortical_outputs = {}
         dopamine = hormones.get('dopamine', 0.0)
         
@@ -84,15 +86,14 @@ class NaturalBrain(nn.Module):
             modulated_input = region_input * (1.0 + dopamine * 0.5)
             module = self.cortex[region_name]
             
-            # Apply Checkpointing to heavy cortical regions
-            if modulated_input.requires_grad:
+            # Checkpointing Logic
+            if self.use_checkpointing and modulated_input.requires_grad:
                 if isinstance(module, FullLanguageZone):
-                    # Pass inputs as tuple for checkpoint compatibility
                     out = checkpoint.checkpoint(module, modulated_input, input_ids, use_reentrant=False)
                 else:
                     out = checkpoint.checkpoint(module, modulated_input, use_reentrant=False)
             else:
-                # No checkpointing during inference/no-grad
+                # Standard execution (Safe, uses more VRAM)
                 if isinstance(module, FullLanguageZone):
                     out = module(modulated_input, input_ids=input_ids)
                 else:
