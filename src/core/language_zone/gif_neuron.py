@@ -39,7 +39,7 @@ class MultiBitSurrogate(torch.autograd.Function):
         # Let's use a triangular window around 0.5 (midpoint) or around integers?
         # If we use floor(), the jump happens at integers.
         # So we want gradient to be non-zero around integers.
-        # frac is distance from src.coresrc.basefloor. 
+        # frac is distance from src.basesrc.coresrc.basefloor. 
         # If input is 1.9, frac is 0.9. Close to 2.0.
         # If input is 2.1, frac is 0.1. Close to 2.0.
         
