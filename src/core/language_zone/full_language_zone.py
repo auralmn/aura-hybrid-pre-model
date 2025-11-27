@@ -63,9 +63,7 @@ class FullLanguageZone(nn.Module):
         self.decoder = GIFNeuron(self.hidden_dim, self.embed_dim, L=16)
         self.output_norm = nn.LayerNorm(self.embed_dim)
     
-   def forward(self, 
-                inputs_embeds: torch.Tensor, 
-                input_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
+   def forward(self, inputs_embeds: torch.Tensor, input_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Forward pass.
         """
