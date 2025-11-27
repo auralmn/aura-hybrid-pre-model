@@ -41,18 +41,6 @@ class MultiChannelSpikingAttention(nn.Module):
         self.normalize_salience = normalize_salience
 
     def _lif_batch(self, x: torch.Tensor, decay: float, theta: float = 1.0) -> torch.Tensor:
-        """
-        Batched LIF without loops (Vectorized Scan).
-        x: [Batch, Seq_Len]
-        """
-        # Efficient cumulative decay via log-space or sequential scan
-        # For typical seq_len (512), a simple JIT loop is best, 
-        # or we use a cumulative sum approximation if decay is simple.
-        
-        # Here we use a fast iterative scan which is JIT-friendly
-        # Or simply use PyTorch's native associative scan if available (complex)
-        
-        # Simple loop is fast enough on GPU for L=512 compared to CPU overhead
         batch_size, seq_len = x.shape
         v = torch.zeros(batch_size, device=x.device)
         spikes = []
@@ -69,10 +57,6 @@ class MultiChannelSpikingAttention(nn.Module):
                 amp: torch.Tensor, 
                 pitch: torch.Tensor, 
                 boundary: torch.Tensor) -> Dict[str, torch.Tensor]:
-        """
-        Compute attention gains.
-        Inputs: [Batch, Seq_Len] tensors on GPU.
-        """
         # 1. LIF Spiking
         s_amp = self._lif_batch(amp, self.decay[0])
         s_pitch = self._lif_batch(pitch, self.decay[1])
@@ -85,11 +69,9 @@ class MultiChannelSpikingAttention(nn.Module):
                
         # 3. Smoothing (Conv1d)
         if self.smoothing > 1:
-            # Reshape for conv1d: [Batch, Channel, Seq]
             sal_in = sal.unsqueeze(1)
             kernel = torch.ones(1, 1, self.smoothing, device=sal.device) / self.smoothing
             sal = F.conv1d(sal_in, kernel, padding=self.smoothing//2).squeeze(1)
-            # Truncate to original length if needed
             sal = sal[:, :amp.shape[1]]
 
         # 4. Normalize
@@ -98,14 +80,11 @@ class MultiChannelSpikingAttention(nn.Module):
             sal = sal / (max_val + 1e-6)
 
         # 5. k-WTA
-        # Find top-k indices
         topk_vals, topk_idx = torch.topk(sal, k=self.k_winners, dim=-1)
         
         # 6. Compute Mu Scalar
-        # Mean salience of winners
         avg_winner = topk_vals.mean(dim=1)
         
-        # Tanh gain curve
         gain_range = self.max_gain - self.min_gain
         mu_scalar = self.min_gain + gain_range * torch.tanh(self.gain_up * avg_winner)
         
@@ -118,63 +97,53 @@ class MultiChannelSpikingAttention(nn.Module):
 def prosody_channels_from_text(token_ids: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Approximation of prosody extraction from Token IDs on GPU.
-    Real extraction requires text, but moving text to CPU is slow.
-    We approximate using token ID statistics or learned embeddings.
-    
-    For now, we return random/heuristic tensors to keep pipeline on GPU.
-    Ideally, this is computed in the DataLoader and passed as a tensor.
+    DETERMINISTIC implementation required for Checkpointing.
     """
     batch, seq = token_ids.shape
     device = token_ids.device
     
-    # Placeholder: Random prosody to allow training to proceed without CPU
-    # In production, compute this in Dataset __getitem__
-    amp = torch.rand(batch, seq, device=device)
-    pitch = torch.rand(batch, seq, device=device)
-    boundary = (torch.rand(batch, seq, device=device) > 0.8).float()
+    # Use deterministic math on token IDs instead of rand()
+    # This ensures that if we re-run forward with the same inputs, 
+    # we get the EXACT same prosody tensors.
+    
+    # 1. Amplitude: Map ID hash to [0, 1]
+    # Simple pseudo-hash: sin(id)
+    amp = torch.sin(token_ids.float() * 0.1).abs()
+    
+    # 2. Pitch: Different frequency
+    pitch = torch.cos(token_ids.float() * 0.05).abs()
+    
+    # 3. Boundary: Threshold on another frequency
+    boundary_raw = torch.sin(token_ids.float() * 0.3)
+    boundary = (boundary_raw > 0.8).float()
     
     return amp, pitch, boundary
 
 class AttentionPresets:
-    """Pre-configured attention settings for different use cases"""
-    
     @staticmethod
     def analytical() -> MultiChannelSpikingAttention:
-        """For analytical/linguistic processing"""
         return MultiChannelSpikingAttention(
-            k_winners=3,
-            w_amp=0.8, w_pitch=1.2, w_bound=1.0,
-            gain_up=1.5, gain_down=0.7,
-            smoothing=2
+            k_winners=3, w_amp=0.8, w_pitch=1.2, w_bound=1.0,
+            gain_up=1.5, gain_down=0.7, smoothing=2
         )
     
     @staticmethod
     def emotional() -> MultiChannelSpikingAttention:
-        """For emotional/sentiment processing"""
         return MultiChannelSpikingAttention(
-            k_winners=5,
-            w_amp=1.2, w_pitch=1.5, w_bound=0.6,
-            gain_up=2.0, gain_down=0.4,
-            smoothing=1
+            k_winners=5, w_amp=1.2, w_pitch=1.5, w_bound=0.6,
+            gain_up=2.0, gain_down=0.4, smoothing=1
         )
     
     @staticmethod
     def historical() -> MultiChannelSpikingAttention:
-        """For historical/temporal processing"""
         return MultiChannelSpikingAttention(
-            k_winners=4,
-            w_amp=1.0, w_pitch=1.0, w_bound=1.3,
-            gain_up=1.8, gain_down=0.6,
-            smoothing=3
+            k_winners=4, w_amp=1.0, w_pitch=1.0, w_bound=1.3,
+            gain_up=1.8, gain_down=0.6, smoothing=3
         )
     
     @staticmethod
     def streaming() -> MultiChannelSpikingAttention:
-        """For streaming/real-time processing"""
         return MultiChannelSpikingAttention(
-            k_winners=6,
-            w_amp=1.0, w_pitch=1.0, w_bound=1.0,
-            gain_up=1.6, gain_down=0.5,
-            smoothing=0,  # No smoothing for real-time
-            normalize_salience=False  # Keep raw salience for streaming
+            k_winners=6, w_amp=1.0, w_pitch=1.0, w_bound=1.0,
+            gain_up=1.6, gain_down=0.5, smoothing=0, normalize_salience=False
         )
