@@ -92,7 +92,9 @@ class PlaceCellSemanticEncoder(nn.Module):
         topk_activations = torch.sigmoid(topk_values)
         
         # Scatter sparse activations into full place cell vector
-        place_cell_activity.scatter_(
+        # Scatter sparse activations into full place cell vector
+        # Use out-of-place scatter to avoid DirectML in-place errors
+        place_cell_activity = place_cell_activity.scatter(
             dim=-1,
             index=topk_indices,
             src=topk_activations
