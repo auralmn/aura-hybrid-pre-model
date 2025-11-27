@@ -6,10 +6,8 @@ Fuses amplitude/pitch/boundary signals using tensor operations.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 
-@dataclass
 class MultiChannelSpikingAttention(nn.Module):
     """
     GPU-accelerated Spiking Attention.
@@ -136,3 +134,47 @@ def prosody_channels_from_text(token_ids: torch.Tensor) -> Tuple[torch.Tensor, t
     boundary = (torch.rand(batch, seq, device=device) > 0.8).float()
     
     return amp, pitch, boundary
+
+class AttentionPresets:
+    """Pre-configured attention settings for different use cases"""
+    
+    @staticmethod
+    def analytical() -> MultiChannelSpikingAttention:
+        """For analytical/linguistic processing"""
+        return MultiChannelSpikingAttention(
+            k_winners=3,
+            w_amp=0.8, w_pitch=1.2, w_bound=1.0,
+            gain_up=1.5, gain_down=0.7,
+            smoothing=2
+        )
+    
+    @staticmethod
+    def emotional() -> MultiChannelSpikingAttention:
+        """For emotional/sentiment processing"""
+        return MultiChannelSpikingAttention(
+            k_winners=5,
+            w_amp=1.2, w_pitch=1.5, w_bound=0.6,
+            gain_up=2.0, gain_down=0.4,
+            smoothing=1
+        )
+    
+    @staticmethod
+    def historical() -> MultiChannelSpikingAttention:
+        """For historical/temporal processing"""
+        return MultiChannelSpikingAttention(
+            k_winners=4,
+            w_amp=1.0, w_pitch=1.0, w_bound=1.3,
+            gain_up=1.8, gain_down=0.6,
+            smoothing=3
+        )
+    
+    @staticmethod
+    def streaming() -> MultiChannelSpikingAttention:
+        """For streaming/real-time processing"""
+        return MultiChannelSpikingAttention(
+            k_winners=6,
+            w_amp=1.0, w_pitch=1.0, w_bound=1.0,
+            gain_up=1.6, gain_down=0.5,
+            smoothing=0,  # No smoothing for real-time
+            normalize_salience=False  # Keep raw salience for streaming
+        )
