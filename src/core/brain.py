@@ -23,14 +23,10 @@ from .layers_factory import LayersFactory
 from .neuron_factory import NeuronFactory
 from base.snn_layers import BaseLayerConfig, BaseLayerContainer, BaseLayerContainerConfig
 from base.neuron import NeuronalState
-from base.snn_brain_zones import BrainZone, BrainZoneConfig
+from base.snn_brain_zones import NeuromorphicBrainZone as BrainZone, BrainZoneConfig
 from base.brain_zone_factory import BrainZoneFactory
 
 # Enhanced imports
-from base.snn_brain_zones import (
-    NeuromorphicBrainZone,
-    BrainZoneType,
-)
 from base.snn_brain_stats import BrainStats, StatsCollector
 from base.snn_processor import NeuromorphicProcessor, ContentRouter, ProcessingMode
 from base.snn_layers import BaseLayerFactory, create_neuromorphic_layer_stack
@@ -56,24 +52,42 @@ except Exception:
     create_default_feeds = None  # type: ignore
     RSSFeedConfig = None  # type: ignore
 
-"""
-Enhanced Brain (GPU-Optimized Integration).
-"""
+
+
 
 import torch
 import torch.nn as nn
+import numpy as np
 from typing import Dict, Any, Optional, Tuple, List
 from dataclasses import dataclass
+import asyncio
 
-# Use optimized components
-from core.liquid_moe import LiquidMoERouter
-from base.snn_brain_zones import NeuromorphicBrainZone, BrainZoneConfig, BrainZoneType
-from base.events import EventBus
+# Optimized components
+from src.core.liquid_moe import LiquidMoERouter
+from src.base.snn_brain_zones import NeuromorphicBrainZone, BrainZoneConfig, BrainZoneType
+from src.base.events import EventBus
+from src.base.snn_brain_stats import StatsCollector
+from src.training.hebbian_layer import OjaLayer
+from src.training.optimized_whitener import OptimizedWhitener
+# Assuming Embedder is available or mocked for LiquidBrain
+from src.encoders.fast_hash_embedder import FastHashEmbedder 
 
+# --- Central Nervous System (CNS) for Liquid Brain ---
+class CentralNervousSystem:
+    def __init__(self):
+        self.stress_level = 0.0
+        self.consolidation_factor = 1.0 
+
+    def update_stress(self, error: float):
+        self.stress_level = (self.stress_level * 0.9) + (error * 0.1)
+        
+    def get_endocrine_levels(self) -> Dict[str, float]:
+        return {'cortisol': self.stress_level, 'dopamine': max(0.0, 1.0 - self.stress_level)}
+
+# --- Enhanced Brain (Primary Model) ---
 class EnhancedBrain(nn.Module):
     """
-    Main Brain Module.
-    Integrates multiple Brain Zones (Cortical, Hippocampal, etc.) on GPU.
+    Main Brain Module (GPU-Native).
     """
     def __init__(self, 
                  d_model: int = 1024, 
@@ -83,20 +97,15 @@ class EnhancedBrain(nn.Module):
         self.d_model = d_model
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         self.event_bus = EventBus()
+        self.stats_collector = StatsCollector()
         
-        # Initialize Zones as ModuleDict (automatically registered)
         self.zones = nn.ModuleDict()
-        
         if zones_config:
             for name, config in zones_config.items():
-                # Ensure config matches model dim
                 config.d_model = d_model
                 config.name = name
-                # Create GPU-native zone
                 self.zones[name] = NeuromorphicBrainZone(config).to(self.device)
                 
-        # Global Router (Liquid State Machine)
-        # Routes signals between zones based on content
         self.global_router = LiquidMoERouter(
             in_dim=d_model,
             hidden_dim=256,
@@ -106,99 +115,115 @@ class EnhancedBrain(nn.Module):
         
         self.zone_names = list(self.zones.keys())
 
-    def process_input(self, 
-                      x: torch.Tensor, 
-                      text_context: Optional[str] = None,
-                      content_context: Optional[Dict[str, Any]] = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
-        """
-        API-Compatible Processing Wrapper.
-        
-        Args:
-            x: Input embeddings [Batch, Seq_Len, Dim]
-            text_context: Optional text string (for legacy logging/routing fallback)
-            content_context: Optional dict with metadata (e.g. 'source', 'timestamp')
-            
-        Returns:
-            output: Processed tensor
-            info: Dictionary containing routing info, activity stats, etc.
-        """
-        # Ensure input is on correct device
-        if x.device != self.device:
-            x = x.to(self.device)
-            
-        # Run optimized forward pass
+    def process_input(self, x: torch.Tensor, text_context: Optional[str] = None, content_context: Optional[Dict] = None) -> Tuple[torch.Tensor, Dict]:
+        if x.device != self.device: x = x.to(self.device)
         output, internal_info = self.forward(x, context=content_context)
-        
-        # Augment info with context for API compatibility
         info = {
             'mode': 'neuromorphic_gpu',
             'routing': internal_info['routing'],
             'zone_activities': internal_info['activity'],
-            'text_context': text_context,
-            'content_context': content_context or {}
+            'text_context': text_context
         }
-        
         return output, info
 
     def forward(self, x: torch.Tensor, context: Optional[Dict] = None) -> Tuple[torch.Tensor, Dict]:
-        """
-        Process input through the brain (GPU Optimized).
-        Args:
-            x: Input embeddings [Batch, Seq_Len, Dim]
-        """
-        batch_size, seq_len, _ = x.shape
-        
-        # 1. Global Routing (Per-token or Per-Sequence?)
-        # For efficiency, we pool the sequence to route
-        # [Batch, Seq, Dim] -> [Batch, Dim]
+        batch_size = x.shape[0]
         pooled_x = x.mean(dim=1)
-        
         routing_out = self.global_router(pooled_x)
-        topk_indices = routing_out['indices'] # [Batch, k]
-        topk_weights = routing_out['weights'] # [Batch, k]
         
-        # 2. Dispatch to Zones
+        topk_indices = routing_out['indices']
+        topk_weights = routing_out['weights']
+        
         zone_outputs = torch.zeros_like(x)
         total_activity = {}
-        
-        # Iterate unique active zones in this batch to save compute
         active_indices = torch.unique(topk_indices)
         
         for idx in active_indices:
             zone_idx = idx.item()
             if zone_idx >= len(self.zone_names): continue
-            
             zone_name = self.zone_names[zone_idx]
-            zone_module = self.zones[zone_name]
+            z_out, z_stats = self.zones[zone_name](x)
             
-            # Forward pass through zone
-            # [Batch, Seq, Dim]
-            z_out, z_stats = zone_module(x)
-            
-            # Masking: Apply contribution only where this zone was selected
-            # Mask: [Batch, 1, 1]
-            mask = (topk_indices == idx).any(dim=1).float().view(batch_size, 1, 1)
-            
-            # Weighted combination
-            # Sum weights where selected (usually selected once)
-            # w: [Batch, 1]
-            is_selected = (topk_indices == idx) # [Batch, k]
-            w = (topk_weights * is_selected.float()).sum(dim=1).view(batch_size, 1, 1)
-            
+            mask = (topk_indices == idx)
+            w = (topk_weights * mask.float()).sum(dim=1).view(batch_size, 1, 1)
             zone_outputs += z_out * w
             total_activity[zone_name] = z_stats.get('avg_firing_rate', 0.0)
             
-        # 3. Residual / Skip Connection
-        output = x + zone_outputs
+        return x + zone_outputs, {"routing": routing_out['probs'].detach().cpu().numpy(), "activity": total_activity}
+
+    def get_brain_statistics(self):
+        return self.stats_collector.get_stats()
+
+    def check_training_stability(self):
+        return {'overall': self.stats_collector.get_stats().stability_status}
+
+# Alias
+Brain = EnhancedBrain
+
+# --- Liquid Brain (Advanced Learning System) ---
+class LiquidBrain:
+    """
+    Secondary Brain System for Online Learning tasks (Hebbian + Liquid MoE).
+    Now updated to use GPU components.
+    """
+    def __init__(self, n_experts: int = 15, hebbian_components: int = 64, d_model: int = 1024):
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.d_model = d_model
         
-        # Detach routing info for CPU return to avoid blocking
-        return output, {
-            "routing": routing_out['probs'].detach().cpu().numpy(),
-            "activity": total_activity
+        # Components
+        self.cns = CentralNervousSystem()
+        self.embedder = FastHashEmbedder(dim=d_model)
+        self.whitener = OptimizedWhitener(dim=d_model).to(self.device)
+        
+        # Hebbian Layer (GPU)
+        self.hippocampus = OjaLayer(
+            n_components=hebbian_components,
+            input_dim=d_model
+        ).to(self.device)
+        
+        # Cortex (Liquid MoE Router)
+        # Note: We use the router itself as the "Cortex" here
+        self.cortex = LiquidMoERouter(
+            in_dim=d_model, # Oja output is same dim if we project back, or hebbian_components
+            # Logic adjustment: OjaLayer projects to [Components], reconstructs to [Input].
+            # We usually route the abstraction (components).
+            # Let's assuming routing on raw input for now to match LiquidMoERouter sig.
+            hidden_dim=128,
+            num_experts=n_experts,
+            top_k=3
+        ).to(self.device)
+
+    async def process_query(self, query: str, target_signal: float = 0.0) -> Dict[str, Any]:
+        # 1. Embed
+        # Encode returns tensor on CPU usually, move to GPU
+        x_emb, _ = self.embedder.encode_with_indices(query)
+        x_emb = x_emb.to(self.device)
+        
+        # 2. Whiten & Hebbian
+        xw = self.whitener(x_emb)
+        oja_out = self.hippocampus.step(xw)
+        
+        # 3. Route (Forward only for inference demo)
+        # LiquidMoE forward returns routing info
+        route_out = self.cortex(xw)
+        
+        # Simulate prediction from routing weights (mock expert)
+        # In real system, we'd have experts attached.
+        # Prediction = weighted sum of expert IDs for demo?
+        # Or just use router logit magnitude.
+        prediction = route_out['weights'].mean().item()
+        
+        # 4. CNS
+        self.cns.update_stress(abs(target_signal - prediction))
+        
+        return {
+            "prediction": prediction,
+            "hebbian_residual": oja_out.residual_ema,
+            "stress_level": self.cns.stress_level,
+            "moe_output": {'topk': []} # Simplified for demo
         }
 
-# Factory for convenience
-def create_aura_brain(d_model=1024, device='cuda') -> EnhancedBrain:
+def create_aura_brain(d_model=1024, device='cuda'):
     zones = {
         'prefrontal': BrainZoneConfig(max_neurons=512, zone_type=BrainZoneType.PREFRONTAL_CORTEX),
         'hippocampus': BrainZoneConfig(max_neurons=512, zone_type=BrainZoneType.HIPPOCAMPUS),
@@ -206,38 +231,6 @@ def create_aura_brain(d_model=1024, device='cuda') -> EnhancedBrain:
         'amygdala': BrainZoneConfig(max_neurons=256, zone_type=BrainZoneType.AMYGDALA),
     }
     return EnhancedBrain(d_model=d_model, zones_config=zones, device=device)
-
-# Backwards-compatible alias for tests expecting `Brain`
-from cli.config import BrainConfig, Config
-
-class Brain(EnhancedBrain):
-    """Backwards compatible Brain class.
-
-    Accepts a ``BrainConfig`` (or ``Config``) instance as used in older code and
-    forwards the relevant parts to ``EnhancedBrain``.
-    """
-
-    def __init__(self, config: Config):
-        # ``config`` may be a ``BrainConfig`` alias; both have the same fields.
-        # Extract layer configuration and brain zone configurations.
-        layers_cfg = getattr(config, "layers_config", None)
-        zones_cfg = getattr(config, "brain_zones_config", [])
-        # Convert list of BrainZoneConfig objects to a dict keyed by name if needed.
-        zones_dict = {}
-        for zone in zones_cfg:
-            # Assume each zone has a ``name`` attribute; fallback to its class name.
-            zone_name = getattr(zone, "name", zone.__class__.__name__)
-            zones_dict[zone_name] = zone
-        # Initialise the parent class with defaults for other parameters.
-        super().__init__(
-            config=layers_cfg,
-            zones=zones_dict,
-            d_model=1024,
-            use_neuromorphic=True,
-            processing_mode=ProcessingMode.NEUROMORPHIC,
-        )
-
-# --- Liquid MoE Integration Components ---
 
 class ConsciousnessLevel(Enum):
     DEEP_SLEEP = 0; ASLEEP = 1; ALERT = 2; FOCUSED = 3; HYPERVIGILANT = 4

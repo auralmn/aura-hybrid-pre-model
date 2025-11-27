@@ -1,8 +1,5 @@
 """
-Test Suite for HippocampalTransformerTrainer
-
-TDD: Write tests FIRST before implementation.
-Tests the training loop, memory replay, and consolidation mechanisms.
+Test Suite for HippocampalTransformerTrainer (GPU-Native Compatible)
 """
 
 import sys
@@ -10,125 +7,134 @@ import os
 from pathlib import Path
 import torch
 import torch.nn as nn
+from dataclasses import dataclass
 
 # Add parent directory to path
-script_dir = Path(__file__).parent
-project_root = script_dir.parent.parent
-sys.path.insert(0, str(project_root))
-
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 from src.core.hippocampal import HippocampalFormation
-# We will implement this module next
-# from src.training.hippocampal_trainer import HippocampalTransformerTrainer, ReplayBuffer, EWCConsolidator
+from src.training.hippocampal_trainer import HippocampalTransformerTrainer, ReplayBuffer, EWCConsolidator
 
-def test_replay_buffer_priority():
-    """Test that ReplayBuffer stores and retrieves based on priority (loss)."""
-    from src.training.hippocampal_trainer import ReplayBuffer
+class MockModel(nn.Module):
+    """Mock model mimicking HippocampalTransformer signature."""
+    def __init__(self):
+        super().__init__()
+        self.linear = nn.Linear(10, 2)
+        
+    def forward(self, input_ids, prosody=None, use_memory=True):
+        # Return tuple (logits, place_cell_activity)
+        logits = self.linear(input_ids.float())
+        # Mock place activity (batch, seq, 1)
+        place_activity = torch.zeros(input_ids.shape[0], 1, 1)
+        return logits, place_activity
+
+def test_replay_buffer_sampling():
+    """Test ReplayBuffer stores and retrieves data correctly."""
+    print("\nRunning test_replay_buffer_sampling...")
     
     buffer = ReplayBuffer(capacity=10)
     
-    # Add items with different losses
-    # Item: (input_ids, labels, loss)
-    buffer.add(torch.tensor([1]), torch.tensor([1]), 1.0) # Low priority
-    buffer.add(torch.tensor([2]), torch.tensor([2]), 10.0) # High priority
-    buffer.add(torch.tensor([3]), torch.tensor([3]), 5.0) # Medium priority
+    # Add items (input_ids, labels, loss)
+    # Note: input_ids must be 2D [Batch, Seq] or 1D [Seq] depending on usage
+    # The buffer expects [Batch, Seq] and splits it into [Seq] items.
+    
+    # Create a batch of 2 items
+    inputs = torch.tensor([[1, 2], [3, 4]], dtype=torch.float32) # [2, 2]
+    labels = torch.tensor([[1, 0], [0, 1]], dtype=torch.long)    # [2, 2]
+    loss = 1.5
+    
+    buffer.add(inputs, labels, loss)
+    
+    # Should have 2 items (unpacked batch)
+    assert len(buffer) == 2
     
     # Sample batch of 1
     batch = buffer.sample(batch_size=1)
     
-    # Should sample the highest loss item (greedy or high prob)
-    # For this test, we assume a simple priority queue or high probability
-    # If using stochastic sampling, we might need to seed or sample more
-    
-    # Let's assume the implementation uses a simple priority sort for now or high temp
-    assert len(buffer) == 3
-    
-    # Verify structure
-    assert isinstance(batch, list)
     assert len(batch) == 1
-    input_ids, labels, loss = batch[0]
-    assert isinstance(input_ids, torch.Tensor)
-
-    print("✅ test_replay_buffer_priority PASSED")
+    item = batch[0]
+    # Item structure: (input_ids, labels, loss)
+    assert len(item) == 3
+    assert isinstance(item[0], torch.Tensor)
+    assert isinstance(item[1], torch.Tensor)
+    assert isinstance(item[2], float)
+    
+    print("✅ test_replay_buffer_sampling PASSED")
 
 def test_ewc_penalty():
-    """Test that EWC consolidator calculates penalty for weight changes."""
-    from src.training.hippocampal_trainer import EWCConsolidator
+    """Test EWC penalty calculation."""
+    print("\nRunning test_ewc_penalty...")
     
-    model = nn.Linear(10, 2)
+    model = MockModel()
     consolidator = EWCConsolidator(model)
     
-    # 1. Compute Fisher (simulate training data)
-    # We need to feed some data to compute gradients
-    inputs = torch.randn(5, 10)
-    # Targets should be class indices for CrossEntropyLoss
+    # 1. Compute Fisher
+    inputs = torch.randn(5, 10) # [Batch, Dim]
     targets = torch.randint(0, 2, (5,))
     
-    # Mock a dataloader
+    # Mock dataloader: list of (inputs, labels)
     dataloader = [(inputs, targets)]
     
     consolidator.compute_fisher(dataloader, device='cpu')
     
-    # 2. Change weights (simulate learning new task)
+    # Check fisher populated
+    assert len(consolidator.fisher) > 0
+    
+    # 2. Change weights
     with torch.no_grad():
-        model.weight.add_(1.0) # Big change
+        model.linear.weight.add_(1.0)
         
     # 3. Calculate penalty
     penalty = consolidator.penalty(model)
     
-    assert penalty > 0, "EWC penalty should be positive when weights change"
-    assert penalty.requires_grad, "Penalty should be differentiable"
+    assert penalty > 0.0
+    assert penalty.requires_grad
     
     print("✅ test_ewc_penalty PASSED")
 
 def test_wake_sleep_cycle():
-    """Test trainer transitions between Wake and Sleep phases."""
-    from src.training.hippocampal_trainer import HippocampalTransformerTrainer
-    from dataclasses import dataclass
+    """Test Wake/Sleep phase transition."""
+    print("\nRunning test_wake_sleep_cycle...")
     
     @dataclass
     class MockConfig:
         sleep_interval: int = 5
-        sleep_steps: int = 2
         batch_size: int = 2
         lr: float = 1e-4
+        # Loss params
+        label_smoothing: float = 0.0
+        entropy_lambda: float = 0.0
+        sparsity_lambda: float = 0.0
+        target_sparsity: float = 0.03
         
     config = MockConfig()
-    model = nn.Linear(10, 2) # Mock model
-    hippocampus = HippocampalFormation(10, 100, 10, 50)
+    model = MockModel()
+    # Minimal hippocampus
+    hippo = HippocampalFormation(spatial_dimensions=2, n_place_cells=10, n_time_cells=5, n_grid_cells=5, device='cpu')
     
-    trainer = HippocampalTransformerTrainer(model, config, hippocampus)
+    trainer = HippocampalTransformerTrainer(model, config, hippo)
     
     # Initial state
     assert trainer.phase == "wake"
     assert trainer.global_step == 0
     
-    # Simulate training steps
-    # We need to mock the train_step method or call a simplified version
-    
-    # Step 1-4: Wake
+    # Steps 1-4: Wake
     for _ in range(4):
         trainer.step_counter()
         assert trainer.phase == "wake"
         
-    # Step 5: Should trigger Sleep
+    # Step 5: Trigger Sleep
     trainer.step_counter()
-    # Depending on implementation, it might switch state immediately or return a flag
-    # Let's assume it switches state
-    
-    # If the trainer handles the loop, we might need to inspect internal state
-    # For TDD, let's define that `should_sleep()` returns True
-    
-    assert trainer.should_sleep() == True
+    assert trainer.phase == "sleep"
     
     print("✅ test_wake_sleep_cycle PASSED")
 
 def run_all_tests():
     print("="*60)
-    print("HippocampalTrainer Test Suite (TDD)")
+    print("HippocampalTrainer Test Suite")
     print("="*60)
     
     tests = [
-        test_replay_buffer_priority,
+        test_replay_buffer_sampling,
         test_ewc_penalty,
         test_wake_sleep_cycle,
     ]
@@ -138,12 +144,8 @@ def run_all_tests():
     
     for test_func in tests:
         try:
-            print(f"\nRunning {test_func.__name__}...")
             test_func()
             passed += 1
-        except ImportError as e:
-            print(f"❌ {test_func.__name__} FAILED (Import Error): {e}")
-            failed += 1
         except Exception as e:
             print(f"❌ {test_func.__name__} FAILED: {e}")
             failed += 1
@@ -152,7 +154,6 @@ def run_all_tests():
             
     print("\n" + "="*60)
     print(f"Results: {passed} passed, {failed} failed")
-    print("="*60)
     
     return failed == 0
 
