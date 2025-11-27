@@ -6,7 +6,7 @@ import torch.nn as nn
 from typing import Dict, Any, List, Optional, Union
 
 # Import the optimized JIT-ready neurons
-from base.neuron import (
+from src.base.neuron import (
     BaseNeuronConfig, 
     NeuronalState, 
     Synapse, 
@@ -16,7 +16,7 @@ from base.neuron import (
     IzhikevichNeuron,     # JIT Izhikevich
     AdExNeuron            # JIT AdEx
 )
-from base.events import EventBus
+from src.base.events import EventBus
 
 class Neuron:
     """
