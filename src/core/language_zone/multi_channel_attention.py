@@ -12,7 +12,7 @@ class MultiChannelSpikingAttention(nn.Module):
     """
     GPU-accelerated Spiking Attention.
     """
-    def __init__(self, 
+    def __init__(self,
                  k_winners: int = 5,
                  decay_amp: float = 0.7,
                  decay_pitch: float = 0.7,
@@ -51,7 +51,7 @@ class MultiChannelSpikingAttention(nn.Module):
             v = v - s * theta
             spikes.append(s)
             
-        return torch.stack(spikes, dim=1) # [Batch, Seq]
+        return torch.stack(spikes, dim=1)
 
     def forward(self, 
                 amp: torch.Tensor, 
@@ -67,7 +67,7 @@ class MultiChannelSpikingAttention(nn.Module):
                self.weights[1] * s_pitch + 
                self.weights[2] * s_bound)
                
-        # 3. Smoothing (Conv1d)
+        # 3. Smoothing
         if self.smoothing > 1:
             sal_in = sal.unsqueeze(1)
             kernel = torch.ones(1, 1, self.smoothing, device=sal.device) / self.smoothing
@@ -84,30 +84,24 @@ class MultiChannelSpikingAttention(nn.Module):
         
         # 6. Compute Mu Scalar
         avg_winner = topk_vals.mean(dim=1)
-        
         gain_range = self.max_gain - self.min_gain
         mu_scalar = self.min_gain + gain_range * torch.tanh(self.gain_up * avg_winner)
         
         return {
-            "mu_scalar": mu_scalar, # [Batch]
-            "salience": sal,        # [Batch, Seq]
+            "mu_scalar": mu_scalar,
+            "salience": sal,
             "winners": topk_idx
         }
 
 def prosody_channels_from_text(token_ids: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    Approximation of prosody extraction from Token IDs on GPU.
-    DETERMINISTIC implementation required for Checkpointing.
+    DETERMINISTIC prosody extraction from Token IDs on GPU.
+    Replaces torch.rand with deterministic math to satisfy Checkpointing.
     """
-    batch, seq = token_ids.shape
-    device = token_ids.device
-    
-    # Use deterministic math on token IDs instead of rand()
-    # This ensures that if we re-run forward with the same inputs, 
-    # we get the EXACT same prosody tensors.
+    # token_ids: [Batch, Seq]
     
     # 1. Amplitude: Map ID hash to [0, 1]
-    # Simple pseudo-hash: sin(id)
+    # Use deterministic functions (sin/cos) on fixed IDs
     amp = torch.sin(token_ids.float() * 0.1).abs()
     
     # 2. Pitch: Different frequency
