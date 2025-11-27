@@ -1,12 +1,3 @@
-"""
-GPU-Native Full Language Zone (Temporal Cortex) - Sparse Optimized.
-
-Integrates:
-- Prosody-driven Attention
-- JIT-Compiled SNN Encoder/Decoder
-- Vectorized Liquid MoE Router with SPARSE EXECUTION
-"""
-
 import torch
 import torch.nn as nn
 from typing import Dict, List, Optional, Tuple
@@ -33,9 +24,7 @@ class FullLanguageZone(nn.Module):
         self.encoder = GIFNeuron(self.embed_dim, self.hidden_dim, L=16)
         
         self.spike_to_continuous = SpikeToContinuousBridge(
-            spike_dim=self.hidden_dim,
-            output_dim=self.moe_hidden_dim,
-            encoding='rate'
+            spike_dim=self.hidden_dim, output_dim=self.moe_hidden_dim, encoding='rate'
         )
         
         self.experts = nn.ModuleDict({
@@ -43,41 +32,34 @@ class FullLanguageZone(nn.Module):
                 input_dim=self.moe_hidden_dim,
                 hidden_dim=self.hidden_dim // 2,
                 output_dim=self.moe_hidden_dim
-            )
-            for i in range(self.num_experts)
+            ) for i in range(self.num_experts)
         })
         
         self.moe_router = LiquidMoERouter(
-            in_dim=self.moe_hidden_dim,
-            hidden_dim=64,
-            num_experts=self.num_experts,
-            top_k=self.top_k
+            in_dim=self.moe_hidden_dim, hidden_dim=64,
+            num_experts=self.num_experts, top_k=self.top_k
         )
         
         self.continuous_to_spike = ContinuousToSpikeBridge(
-            input_dim=self.moe_hidden_dim,
-            spike_dim=self.hidden_dim,
-            encoding='poisson'
+            input_dim=self.moe_hidden_dim, spike_dim=self.hidden_dim, encoding='poisson'
         )
         
         self.decoder = GIFNeuron(self.hidden_dim, self.embed_dim, L=16)
         self.output_norm = nn.LayerNorm(self.embed_dim)
     
-    def forward(self, inputs_embeds: torch.Tensor, input_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        Forward pass.
-        """
-        # CRITICAL: Reset internal states to ensure stateless behavior for Checkpointing
+    def forward(self, 
+                inputs_embeds: torch.Tensor, 
+                input_ids: Optional[torch.Tensor] = None) -> torch.Tensor:
+        # CRITICAL FOR CHECKPOINTING: Reset Stateful Components
         if hasattr(self.moe_router, 'cell'):
-            # Reset liquid router state for this batch
-            # Note: flatten batch*seq for router
+            # Flatten batch*seq for router state
             total_items = inputs_embeds.size(0) * inputs_embeds.size(1)
             self.moe_router.cell.reset_state(total_items)
-            
+
         batch_size, seq_len, _ = inputs_embeds.shape
         device = inputs_embeds.device
         
-        # 1. Prosody Modulation
+        # 1. Prosody Modulation (Now Deterministic)
         if input_ids is not None:
             attention_gains, _ = self.prosody_attention(input_ids)
             modulated_input = inputs_embeds * attention_gains.unsqueeze(-1)
@@ -85,15 +67,14 @@ class FullLanguageZone(nn.Module):
             modulated_input = inputs_embeds
             attention_gains = None
 
-        # 2. Encode to Spikes
-        # Pass state=None to force stateless execution
+        # 2. Encode to Spikes (Stateless)
         spikes_enc, _ = self.encoder(modulated_input, state=None)
         
         # 3. Prepare for MoE Routing
         spikes_flat = spikes_enc.reshape(batch_size * seq_len, 1, self.hidden_dim)
         continuous_flat = self.spike_to_continuous(spikes_flat)
         
-        # 4. Route (Liquid MoE)
+        # 4. Route
         flat_gains = attention_gains.view(-1, 1) if attention_gains is not None else None
         route_out = self.moe_router(continuous_flat, attn_gain=flat_gains)
         
@@ -102,13 +83,11 @@ class FullLanguageZone(nn.Module):
         
         # 5. Sparse Expert Execution
         expert_outputs = torch.zeros_like(continuous_flat)
-        
         for i in range(self.num_experts):
             selection_mask = (topk_indices == i)
             token_mask = selection_mask.any(dim=1)
             
-            if not token_mask.any():
-                continue
+            if not token_mask.any(): continue
                 
             active_indices = torch.where(token_mask)[0]
             active_inputs = continuous_flat[active_indices]
@@ -131,5 +110,4 @@ class FullLanguageZone(nn.Module):
             
         decoded, _ = self.decoder(spikes_moe_avg, state=None)
         
-        # 8. Output Norm
         return self.output_norm(decoded)

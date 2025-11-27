@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import math
-from typing import Any, Tuple
 
 class MultiBitSurrogate(torch.autograd.Function):
     @staticmethod
@@ -22,9 +21,6 @@ class MultiBitSurrogate(torch.autograd.Function):
         return grad_output * in_range.float() * grad_scale, None
 
 class GIFNeuron(nn.Module):
-    """
-    Stateless GIF Neuron for Language Zone.
-    """
     def __init__(self, input_dim, hidden_dim, L=16, dt=1.0, tau=10.0, 
                  threshold=1.0, alpha=0.01):
         super().__init__()
@@ -43,7 +39,7 @@ class GIFNeuron(nn.Module):
         batch_size, seq_len, _ = x.shape
         device = x.device
         
-        # Always initialize fresh state if not provided
+        # Always initialize fresh state if not provided (Stateless for Checkpointing)
         if state is None:
             v = torch.zeros(batch_size, self.hidden_dim, device=device)
             theta = torch.full((batch_size, self.hidden_dim), self.threshold, device=device)
@@ -57,18 +53,14 @@ class GIFNeuron(nn.Module):
             i_t = h[:, t, :]
             v = v * self.decay + i_t
             
-            # Clamp
             clamp_limit = self.L * theta * 2.0
             v = torch.clamp(v, -clamp_limit, clamp_limit)
             
-            # Spike
             normalized_v = v / (theta + 1e-6)
             spike = MultiBitSurrogate.apply(normalized_v, self.L)
             
-            # Reset
             v = v - spike * theta
             
-            # Adapt threshold
             if self.alpha > 0:
                 theta = theta + self.alpha * spike - self.alpha * (theta - self.threshold)
                 
