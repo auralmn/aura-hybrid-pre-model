@@ -1,7 +1,7 @@
 
 from dataclasses import dataclass
 from typing import Dict, Any
-from base.layers import BaseLayer, BaseLayerContainerConfig
+from src.base.layers import BaseLayer, BaseLayerContainerConfig
 
 
 

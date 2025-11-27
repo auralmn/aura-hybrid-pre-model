@@ -4,9 +4,9 @@ import csv
 import json
 import torch
 
-from base.layers import BaseLayer, BaseLayerConfig, BaseLayerImplementation
-from base.events import EventBus
-from base.snn_brain_zones import NeuromorphicBrainZone as BrainZone, BrainZoneConfig, BrainZoneType, SpikingNeuronConfig
+from src.base.layers import BaseLayer, BaseLayerConfig, BaseLayerImplementation
+from src.base.events import EventBus
+from src.base.snn_brain_zones import NeuromorphicBrainZone as BrainZone, BrainZoneConfig, BrainZoneType, SpikingNeuronConfig
 
 # -----------------------------
 # Pattern CSV integration helpers
