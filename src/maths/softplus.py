@@ -1,5 +1,19 @@
-import numpy as np
+"""
+PyTorch Softplus Implementation.
+Wraps torch.nn.functional.softplus for compatibility.
+"""
 
-def softplus(x: np.ndarray) -> np.ndarray:
-    """Numerically stable softplus"""
-    return np.log1p(np.exp(-np.abs(x))) + np.maximum(x, 0)
+import torch
+import torch.nn.functional as F
+
+def softplus(x: torch.Tensor) -> torch.Tensor:
+    """
+    Numerically stable softplus function.
+    f(x) = ln(1 + exp(x))
+    
+    Args:
+        x: Input tensor on any device.
+    Returns:
+        Tensor on the same device.
+    """
+    return F.softplus(x)

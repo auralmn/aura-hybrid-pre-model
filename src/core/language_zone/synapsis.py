@@ -165,7 +165,7 @@ class Synapsis(nn.Module):
     
     def apply_stdp_update(self, pre_trace, post_trace):
         """
-        Apply STDP weight update (experimental, call from src.training loop).
+        Apply STDP weight update (experimental, call from training loop).
         
         Args:
             pre_trace: Presynaptic trace (batch, in_features)

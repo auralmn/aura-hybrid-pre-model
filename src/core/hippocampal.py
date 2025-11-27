@@ -1,398 +1,297 @@
 """
-Hippocampal Formation Module
+Hippocampal Formation Module (GPU-Native / Vectorized)
 
 Bio-inspired episodic memory system implementing place cells, grid cells, time cells,
-and cognitive maps for spatial and temporal memory encoding.
+and cognitive maps using efficient PyTorch tensor operations for L4/A100 acceleration.
 """
 
+import torch
+import torch.nn as nn
 import numpy as np
 import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any, Literal
 from collections import deque
-from scipy.signal import hilbert
-from scipy.linalg import expm
 
-
+# Keep data classes for metadata storage, but logic moves to tensors
 @dataclass
 class SpatialLocation:
-    """Spatial location with coordinates and context"""
-    coordinates: np.ndarray
-    landmarks: List[str] = field(default_factory=list)
-    context_features: Optional[np.ndarray] = None
+    """Spatial location metadata"""
+    coordinates: torch.Tensor
     timestamp: float = field(default_factory=time.time)
-    visits: int = 1
     
-    def distance_to(self, other: 'SpatialLocation') -> float:
-        """Euclidean distance to another location"""
-        return float(np.linalg.norm(self.coordinates - other.coordinates))
-
-
-@dataclass 
-class TemporalEvent:
-    """Temporal event with timestamp and features"""
-    timestamp: float
-    event_id: str
-    features: np.ndarray
-    duration: float = 0.0
-    context: Optional[Dict[str, Any]] = None
-    
-    def time_distance_to(self, other: 'TemporalEvent') -> float:
-        """Temporal distance to another event"""
-        return abs(self.timestamp - other.timestamp)
-
-
 @dataclass
 class EpisodicMemory:
-    """Episodic memory binding spatial and temporal information"""
+    """Episodic memory metadata (tensor indices managed by formation)"""
     memory_id: str
-    spatial_location: SpatialLocation
-    temporal_event: TemporalEvent
-    associated_experts: List[str] = field(default_factory=list)
+    feature_idx: int  # Index in the GPU memory bank
+    timestamp: float
     strength: float = 1.0
-    retrieval_count: int = 0
+
+class HippocampalFormation(nn.Module):
+    """
+    GPU-Accelerated Hippocampal System.
     
-    def decay_strength(self, decay_rate: float = 0.01) -> None:
-        """Natural memory decay over time"""
-        current_time = time.time()
-        elapsed = current_time - self.temporal_event.timestamp
-        self.strength *= np.exp(-decay_rate * elapsed / 3600.0)
-
-
-class TemporalMemoryInterpolator:
-    """Interpolate between memory states using multiple modes"""
+    Replaces list-based cells with batched tensors:
+    - Place Cells: (N, D) centers
+    - Grid Cells: (N, D) phases/spacings
+    - Memory Bank: (M, Feature_Dim) pre-allocated buffer
+    """
     
-    def __init__(self, epsilon: float = 1e-12):
-        self.epsilon = epsilon
-    
-    def interpolate(self, M0: np.ndarray, M1: np.ndarray, t: float,
-                    mode: Literal['linear', 'fourier', 'hilbert', 'hamiltonian'] = 'hilbert'
-                   ) -> np.ndarray:
-        """
-        Interpolate between two memory states.
+    def __init__(self, 
+                 spatial_dimensions: int = 2, 
+                 n_place_cells: int = 2000, 
+                 n_time_cells: int = 100, 
+                 n_grid_cells: int = 200,
+                 max_memories: int = 100000,
+                 feature_dim: int = 768,
+                 device: str = 'cuda'):
         
-        Args:
-            M0: Initial memory state
-            M1: Final memory state
-            t: Interpolation parameter [0, 1]
-            mode: Interpolation method
-                - linear: Weighted average
-                - fourier: Frequency domain interpolation
-                - hilbert: Phase-preserving analytic signal blend
-                - hamiltonian: Quantum-inspired matrix exponential
+        super().__init__()
+        self.spatial_dims = spatial_dimensions
+        self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         
-        Returns:
-            Interpolated memory state
-        """
-        alpha = np.clip(t, 0.0, 1.0)
+        # --- 1. Vectorized Place Cells ---
+        # Randomly distributed centers: (N_place, D)
+        self.register_buffer('place_centers', 
+                           torch.rand(n_place_cells, spatial_dimensions, device=self.device) * 20 - 10)
+        # Random radii: (N_place, 1)
+        self.register_buffer('place_radii', 
+                           torch.rand(n_place_cells, 1, device=self.device) * 1.5 + 0.5)
+        self.place_max_rate = 20.0
         
-        if mode == 'linear':
-            return (1.0 - alpha) * M0 + alpha * M1
+        # --- 2. Vectorized Grid Cells ---
+        # Spacings log-uniform: (N_grid, 1)
+        spacings = torch.logspace(0, 2, n_grid_cells, base=2.0, device=self.device).unsqueeze(1)
+        self.register_buffer('grid_spacings', spacings)
         
-        elif mode == 'fourier':
-            F0 = np.fft.fft(M0)
-            F1 = np.fft.fft(M1)
-            F_interp = (1.0 - alpha) * F0 + alpha * F1
-            return np.real(np.fft.ifft(F_interp))
+        # Orientations: (N_grid, 1)
+        self.register_buffer('grid_orientations', 
+                           torch.rand(n_grid_cells, 1, device=self.device) * (torch.pi / 3))
         
-        A0 = hilbert(M0, axis=0)
-        A1 = hilbert(M1, axis=0)
-        
-        if mode == 'hilbert':
-            A_interp = (1.0 - alpha) * A0 + alpha * A1
-            return np.real(A_interp)
-        
-        elif mode == 'hamiltonian':
-            A_diff = (A1 - A0).astype(np.complex128)
-            H_num = np.outer(A_diff, A_diff.T.conj())
-            H_den = np.linalg.norm(A_diff)**2 + self.epsilon
-            H = H_num / H_den
-            U = expm(-1j * H * alpha)
-            A_interp = U @ A0
-            return np.real(A_interp)
-        
-        else:
-            raise ValueError(f"Unknown interpolation mode: {mode}")
+        # Phases: (N_grid, D)
+        self.register_buffer('grid_phases', 
+                           torch.rand(n_grid_cells, spatial_dimensions, device=self.device) * spacings)
+        self.grid_max_rate = 25.0
 
-
-class PlaceCell:
-    """Place cell with spatial receptive field"""
-    
-    def __init__(self, center: np.ndarray, radius: float = 1.0):
-        self.center = center
-        self.radius = radius
-        self.firing_rate = 0.0
-        self.theta_phase = 0.0
-        self.max_firing_rate = 20.0
+        # --- 3. Vectorized Time Cells ---
+        # Intervals log-space: (N_time, 1)
+        intervals = torch.logspace(0, 3, n_time_cells, base=10.0, device=self.device).unsqueeze(1)
+        self.register_buffer('time_intervals', intervals)
+        self.register_buffer('time_widths', intervals * 0.3)
         
-    def compute_firing_rate(self, location: np.ndarray) -> float:
-        """Compute firing rate based on distance from center"""
-        distance = np.linalg.norm(location - self.center)
-        if distance <= self.radius:
-            firing_rate = self.max_firing_rate * np.exp(-(distance**2) / (2 * (self.radius/3)**2))
-            self.firing_rate = firing_rate
-            return firing_rate
-        else:
-            self.firing_rate = 0.0
-            return 0.0
-    
-    def update_theta_phase(self, velocity: np.ndarray, dt: float = 0.1) -> None:
-        """Update theta phase based on movement (phase precession)"""
-        speed = np.linalg.norm(velocity)
-        phase_velocity = 2 * np.pi * 8.0
-        self.theta_phase += phase_velocity * dt + 0.1 * speed * dt
-        self.theta_phase = self.theta_phase % (2 * np.pi)
-
-
-class TimeCell:
-    """Time cell tracking temporal intervals"""
-    
-    def __init__(self, preferred_interval: float, width: float = 1.0):
-        self.preferred_interval = preferred_interval
-        self.width = width
-        self.firing_rate = 0.0
-        self.last_event_time = 0.0
-        self.max_firing_rate = 15.0
+        # --- 4. GPU Memory Bank ---
+        # Pre-allocate large buffer for episodic memories to avoid reallocation
+        self.max_memories = max_memories
+        self.memory_count = 0
         
-    def compute_firing_rate(self, current_time: float, last_event_time: float) -> float:
-        """Compute firing rate based on elapsed time since event"""
-        elapsed_time = current_time - last_event_time
+        # Stores [features] for fast similarity search
+        self.register_buffer('memory_features', 
+                           torch.zeros(max_memories, feature_dim, device=self.device))
         
-        if abs(elapsed_time - self.preferred_interval) <= self.width:
-            firing_rate = self.max_firing_rate * np.exp(
-                -((elapsed_time - self.preferred_interval)**2) / (2 * (self.width/3)**2)
-            )
-            self.firing_rate = firing_rate
-            return firing_rate
-        else:
-            self.firing_rate = 0.0
-            return 0.0
-
-
-class GridCell:
-    """Grid cell providing hexagonal spatial coding"""
-    
-    def __init__(self, spacing: float = 1.0, orientation: float = 0.0, phase: np.ndarray = None):
-        self.spacing = spacing
-        self.orientation = orientation
-        self.phase = phase if phase is not None else np.zeros(2)
-        self.firing_rate = 0.0
-        self.max_firing_rate = 25.0
+        # Stores [x, y, ... coords] for spatial lookup
+        self.register_buffer('memory_locations',
+                           torch.zeros(max_memories, spatial_dimensions, device=self.device))
+                           
+        # Stores [strength, timestamp, 0, 0]
+        self.register_buffer('memory_metadata',
+                           torch.zeros(max_memories, 4, device=self.device))
         
-    def compute_firing_rate(self, location: np.ndarray) -> float:
-        """Compute firing rate based on hexagonal grid pattern"""
-        cos_o, sin_o = np.cos(self.orientation), np.sin(self.orientation)
-        rotated_loc = np.array([
-            cos_o * location[0] - sin_o * location[1],
-            sin_o * location[0] + cos_o * location[1]
-        ])
-        
-        shifted_loc = rotated_loc - self.phase
-        k = 4 * np.pi / (self.spacing * np.sqrt(3))
-        
-        u1 = k * shifted_loc[0]
-        u2 = k * (-0.5 * shifted_loc[0] + 0.866 * shifted_loc[1])
-        u3 = k * (-0.5 * shifted_loc[0] - 0.866 * shifted_loc[1])
-        
-        grid_value = (np.cos(u1) + np.cos(u2) + np.cos(u3)) / 3.0 + 0.5
-        
-        self.firing_rate = self.max_firing_rate * max(0, grid_value)
-        return self.firing_rate
-
-
-class HippocampalFormation:
-    """Complete hippocampal system for spatio-temporal processing"""
-    
-    def __init__(self, spatial_dimensions: int = 2, n_place_cells: int = 100, 
-                 n_time_cells: int = 50, n_grid_cells: int = 75):
-        
-        self.spatial_dimensions = spatial_dimensions
-        self.place_cells: List[PlaceCell] = []
-        self.time_cells: List[TimeCell] = []
-        self.grid_cells: List[GridCell] = []
-        
+        # Python-side metadata mapping
         self.episodic_memories: Dict[str, EpisodicMemory] = {}
-        self.spatial_locations: Dict[str, SpatialLocation] = {}
-        self.temporal_events: deque = deque(maxlen=1000)
+        self.id_to_idx: Dict[str, int] = {}
         
-        self.current_location = np.zeros(spatial_dimensions)
-        self.current_velocity = np.zeros(spatial_dimensions)
+        # State
+        self.current_location = torch.zeros(spatial_dimensions, device=self.device)
         self.last_event_time = time.time()
         
-        self.cognitive_map: Dict[Tuple[str, str], float] = {}
-        self.temporal_map: Dict[Tuple[str, str], float] = {}
-        
-        self.theta_frequency = 8.0
-        self.theta_phase = 0.0
-        
-        self._initialize_neural_populations(n_place_cells, n_time_cells, n_grid_cells)
-        
-    def _initialize_neural_populations(self, n_place: int, n_time: int, n_grid: int) -> None:
-        """Initialize neural cell populations"""
-        
-        for _ in range(n_place):
-            center = np.random.uniform(-10, 10, self.spatial_dimensions)
-            radius = np.random.uniform(0.5, 2.0)
-            self.place_cells.append(PlaceCell(center, radius))
-        
-        intervals = np.logspace(0, 3, n_time)
-        for interval in intervals:
-            width = interval * 0.3
-            self.time_cells.append(TimeCell(interval, width))
-        
-        spacings = np.logspace(0, 2, n_grid)
-        for spacing in spacings:
-            orientation = np.random.uniform(0, np.pi/3)
-            phase = np.random.uniform(-spacing/2, spacing/2, 2)
-            self.grid_cells.append(GridCell(spacing, orientation, phase))
-    
-    def update_spatial_state(self, new_location: np.ndarray, dt: float = 0.1) -> None:
-        """Update current spatial state and neural activity"""
-        self.current_velocity = (new_location - self.current_location) / dt
-        self.current_location = new_location.copy()
-        
-        self.theta_phase += 2 * np.pi * self.theta_frequency * dt
-        self.theta_phase = self.theta_phase % (2 * np.pi)
-        
-        for place_cell in self.place_cells:
-            place_cell.compute_firing_rate(new_location)
-            place_cell.update_theta_phase(self.current_velocity, dt)
-        
-        for grid_cell in self.grid_cells:
-            grid_cell.compute_firing_rate(new_location)
-    
-    def process_temporal_event(self, event_id: str, features: np.ndarray, 
-                              context: Optional[Dict[str, Any]] = None) -> None:
-        """Process a temporal event and update time cells"""
-        current_time = time.time()
-        
-        event = TemporalEvent(
-            timestamp=current_time,
-            event_id=event_id,
-            features=features,
-            context=context
-        )
-        self.temporal_events.append(event)
-        
-        for time_cell in self.time_cells:
-            time_cell.compute_firing_rate(current_time, self.last_event_time)
-        
-        self.last_event_time = current_time
-    
-    def create_episodic_memory(self, memory_id: str, event_id: str, features: np.ndarray,
-                              associated_experts: List[str] = None) -> None:
-        """Create new episodic memory binding space and time"""
-        
-        location_id = f"loc_{hash(str(self.current_location))%10000}"
-        if location_id not in self.spatial_locations:
-            self.spatial_locations[location_id] = SpatialLocation(
-                coordinates=self.current_location.copy(),
-                context_features=features.copy() if features is not None else None
-            )
-        
-        self.process_temporal_event(event_id, features)
-        current_event = self.temporal_events[-1]
-        
-        episodic_memory = EpisodicMemory(
-            memory_id=memory_id,
-            spatial_location=self.spatial_locations[location_id],
-            temporal_event=current_event,
-            associated_experts=associated_experts or []
-        )
-        
-        self.episodic_memories[memory_id] = episodic_memory
-        self._update_cognitive_maps(episodic_memory)
-    
-    def _update_cognitive_maps(self, memory: EpisodicMemory) -> None:
-        """Update spatial and temporal cognitive maps.
+        # Pre-compute hex grid vectors for grid cells (constants)
+        self.k_const = 4 * torch.pi / torch.sqrt(torch.tensor(3.0))
 
-        For each existing memory, we store the distance in both directions so the
-        map is effectively bidirectional. This matches the expectation in the
-        integration tests that a graph with *n* memories has *n*(n-1) edges.
+    def update_spatial_state(self, new_location: torch.Tensor, dt: float = 0.1) -> None:
         """
-        for other_memory in self.episodic_memories.values():
-            if other_memory.memory_id != memory.memory_id:
-                spatial_distance = memory.spatial_location.distance_to(other_memory.spatial_location)
-                key_fwd = (memory.memory_id, other_memory.memory_id)
-                key_rev = (other_memory.memory_id, memory.memory_id)
-                self.cognitive_map[key_fwd] = spatial_distance
-                self.cognitive_map[key_rev] = spatial_distance
-                temporal_distance = memory.temporal_event.time_distance_to(other_memory.temporal_event)
-                self.temporal_map[key_fwd] = temporal_distance
-                self.temporal_map[key_rev] = temporal_distance
-                
-            """Update spatial and temporal cognitive maps"""
-            
-            for other_memory in self.episodic_memories.values():
-                if other_memory.memory_id != memory.memory_id:
-                    spatial_distance = memory.spatial_location.distance_to(other_memory.spatial_location)
-                    key = (memory.memory_id, other_memory.memory_id)
-                    self.cognitive_map[key] = spatial_distance
-                    
-                    temporal_distance = memory.temporal_event.time_distance_to(other_memory.temporal_event)
-                    self.temporal_map[key] = temporal_distance
-    
-    def retrieve_similar_memories(self, query_features: np.ndarray, 
-                                 location: Optional[np.ndarray] = None,
-                                 k: int = 5) -> List[Tuple[str, float]]:
-        """Retrieve episodic memories similar to query"""
+        Update current spatial state.
+        Args:
+            new_location: Tensor (Batch, D) or (D,)
+        """
+        if isinstance(new_location, np.ndarray):
+            new_location = torch.from_numpy(new_location).to(self.device, dtype=torch.float32)
         
-        if location is not None:
-            self.update_spatial_state(location)
-        
-        similarities = []
-        
-        for memory_id, memory in self.episodic_memories.items():
-            feature_sim = float(np.dot(query_features, memory.temporal_event.features))
-            feature_sim /= (np.linalg.norm(query_features) * np.linalg.norm(memory.temporal_event.features) + 1e-8)
-            
-            spatial_dist = memory.spatial_location.distance_to(
-                SpatialLocation(coordinates=self.current_location)
-            )
-            spatial_sim = 1.0 / (1.0 + spatial_dist)
-            
-            age = time.time() - memory.temporal_event.timestamp
-            temporal_sim = np.exp(-age / 3600.0)
-            
-            combined_sim = (0.5 * feature_sim + 0.3 * spatial_sim + 0.2 * temporal_sim) * memory.strength
-            similarities.append((memory_id, combined_sim))
-        
-        similarities.sort(key=lambda x: x[1], reverse=True)
-        return similarities[:k]
-    
+        if new_location.dim() == 1:
+            self.current_location = new_location
+        else:
+            self.current_location = new_location[0] # Take first of batch for global state
+
     def get_spatial_context(self) -> Dict[str, Any]:
-        """Get current spatial context representation"""
+        """
+        Compute place and grid cell activities using vectorized GPU ops.
+        """
+        loc = self.current_location.unsqueeze(0) # (1, D)
         
-        place_activity = np.array([cell.firing_rate for cell in self.place_cells])
-        grid_activity = np.array([cell.firing_rate for cell in self.grid_cells])
+        # --- Place Cells (Vectorized) ---
+        # Dist sq: (1, D) - (N, D) -> (N, D) -> norm -> (N,)
+        dists = torch.norm(loc - self.place_centers, dim=1, keepdim=True) # (N, 1)
+        
+        # Gaussian activation
+        # Rate = Max * exp( - dist^2 / (2 * sigma^2) ) where sigma = radius/3
+        sigmas = self.place_radii / 3.0
+        place_rates = self.place_max_rate * torch.exp(-(dists**2) / (2 * sigmas**2))
+        
+        # Mask out-of-radius (optional, but Gaussian handles it mostly)
+        place_rates = place_rates * (dists <= self.place_radii).float()
+        
+        # --- Grid Cells (Vectorized) ---
+        # 3 waves plane calculation
+        cos_o = torch.cos(self.grid_orientations)
+        sin_o = torch.sin(self.grid_orientations)
+        
+        # Rotate location: x' = x cos - y sin, y' = x sin + y cos
+        # This part assumes D=2 for rotation logic, simplifying for general case:
+        x, y = loc[0, 0], loc[0, 1]
+        rot_x = cos_o * x - sin_o * y
+        rot_y = sin_o * x + cos_o * y
+        rotated = torch.cat([rot_x, rot_y], dim=1) # (N, 2)
+        
+        shifted = rotated - self.grid_phases
+        k = self.k_const / self.grid_spacings
+        
+        u1 = k * shifted[:, 0:1]
+        u2 = k * (-0.5 * shifted[:, 0:1] + 0.866 * shifted[:, 1:2])
+        u3 = k * (-0.5 * shifted[:, 0:1] - 0.866 * shifted[:, 1:2])
+        
+        grid_val = (torch.cos(u1) + torch.cos(u2) + torch.cos(u3)) / 3.0 + 0.5
+        grid_rates = self.grid_max_rate * torch.relu(grid_val)
         
         return {
-            "current_location": self.current_location.copy(),
-            "current_velocity": self.current_velocity.copy(),
-            "place_cells": place_activity,
-            "grid_cells": grid_activity,
-            "theta_phase": self.theta_phase,
-            "n_memories": len(self.episodic_memories)
+            "current_location": self.current_location,
+            "place_cells": place_rates.flatten(), # Return tensor, not numpy
+            "grid_cells": grid_rates.flatten(),
+            "n_memories": self.memory_count
         }
-    
+
     def get_temporal_context(self) -> Dict[str, Any]:
-        """Get current temporal context representation"""
+        """Vectorized time cell activity."""
+        elapsed = time.time() - self.last_event_time
         
-        time_activity = np.array([cell.firing_rate for cell in self.time_cells])
-        recent_events = list(self.temporal_events)[-10:]
+        # Gaussian temporal receptive fields
+        # exp( - (t - preferred)^2 / (2 * width^2) )
+        diff = elapsed - self.time_intervals
+        time_rates = 15.0 * torch.exp(-(diff**2) / (2 * (self.time_widths/3)**2))
         
         return {
-            "time_cells": time_activity,
-            "last_event_time": self.last_event_time,
-            "recent_events": [e.event_id for e in recent_events],
-            "temporal_sequence_length": len(self.temporal_events)
+            "time_cells": time_rates.flatten(),
+            "elapsed": elapsed
         }
-    
-    def decay_memories(self, decay_rate: float = 0.01) -> None:
-        """Apply natural memory decay"""
-        for memory in self.episodic_memories.values():
-            memory.decay_strength(decay_rate)
+
+    def create_episodic_memory(self, memory_id: str, event_id: str, features: torch.Tensor,
+                              associated_experts: List[str] = None) -> None:
+        """
+        Store memory in the pre-allocated GPU bank.
+        """
+        if self.memory_count >= self.max_memories:
+            # Simple FIFO overwrite if full (could be improved to LRU)
+            idx = self.memory_count % self.max_memories 
+        else:
+            idx = self.memory_count
+            self.memory_count += 1
+            
+        if isinstance(features, np.ndarray):
+            features = torch.from_numpy(features).to(self.device, dtype=torch.float32)
+            
+        # Write to GPU tensors
+        self.memory_features[idx] = features.detach()
+        self.memory_locations[idx] = self.current_location
         
-        to_remove = [mid for mid, mem in self.episodic_memories.items() if mem.strength < 0.01]
-        for mid in to_remove:
-            del self.episodic_memories[mid]
+        # Metadata: [strength, timestamp, reserved, reserved]
+        self.memory_metadata[idx] = torch.tensor([1.0, time.time(), 0.0, 0.0], device=self.device)
+        
+        # CPU-side tracking
+        self.episodic_memories[memory_id] = EpisodicMemory(
+            memory_id=memory_id,
+            feature_idx=idx,
+            timestamp=time.time()
+        )
+        self.id_to_idx[memory_id] = idx
+
+    def retrieve_similar_memories(self, query_features: torch.Tensor, 
+                                 location: Optional[torch.Tensor] = None,
+                                 k: int = 5) -> List[Tuple[str, float]]:
+        """
+        Massively accelerated retrieval using matrix multiplication.
+        """
+        if self.memory_count == 0:
+            return []
+            
+        if isinstance(query_features, np.ndarray):
+            query_features = torch.from_numpy(query_features).to(self.device, dtype=torch.float32)
+            
+        # 1. Feature Similarity (Cosine)
+        # Normalize query
+        q_norm = torch.nn.functional.normalize(query_features.unsqueeze(0), dim=1)
+        
+        # Slice active memories
+        active_feats = self.memory_features[:self.memory_count]
+        m_norm = torch.nn.functional.normalize(active_feats, dim=1)
+        
+        # Dot product (Vectorized)
+        sim_scores = torch.mm(q_norm, m_norm.t()).squeeze(0) # (M,)
+        
+        # 2. Spatial Similarity (if location provided)
+        spatial_scores = torch.zeros_like(sim_scores)
+        if location is not None:
+            if isinstance(location, np.ndarray):
+                location = torch.from_numpy(location).to(self.device, dtype=torch.float32)
+            
+            active_locs = self.memory_locations[:self.memory_count]
+            dists = torch.norm(active_locs - location, dim=1)
+            spatial_scores = 1.0 / (1.0 + dists)
+            
+        # 3. Temporal Similarity (Exponential decay)
+        active_meta = self.memory_metadata[:self.memory_count]
+        timestamps = active_meta[:, 1]
+        strengths = active_meta[:, 0]
+        
+        ages = time.time() - timestamps
+        temporal_scores = torch.exp(-ages / 3600.0)
+        
+        # 4. Combined Score
+        # Weights: 0.5 Feature, 0.3 Spatial, 0.2 Temporal
+        combined = (0.5 * sim_scores + 
+                   0.3 * spatial_scores + 
+                   0.2 * temporal_scores) * strengths
+                   
+        # 5. Top-K
+        k = min(k, self.memory_count)
+        top_scores, top_indices = torch.topk(combined, k)
+        
+        # Map back to IDs (this part is CPU but K is small, e.g. 5)
+        results = []
+        # Invert the mapping for lookup (could be optimized)
+        idx_to_id = {v: k for k, v in self.id_to_idx.items()}
+        
+        for score, idx in zip(top_scores, top_indices):
+            idx_val = idx.item()
+            if idx_val in idx_to_id:
+                results.append((idx_to_id[idx_val], score.item()))
+                
+        return results
+
+    def decay_memories(self, decay_rate: float = 0.01) -> None:
+        """
+        Vectorized memory decay.
+        """
+        if self.memory_count == 0:
+            return
+            
+        # Update strength in-place on GPU
+        # strength *= exp(-decay * elapsed)
+        # Note: simplistic decay applied every call step, or use timestamp
+        # Ideally, strength = initial * exp(-rate * (now - creation))
+        
+        # Here we apply a multiplicative step decay for active memories
+        self.memory_metadata[:self.memory_count, 0] *= (1.0 - decay_rate)
+        
+        # Pruning (Optional: zero out very weak memories to free slots?)
+        # For fixed bank, we usually just overwrite via circular buffer (FIFO)
+        # or implement a "free list" for strength < threshold.
+        pass

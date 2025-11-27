@@ -12,9 +12,9 @@ import torch
 import torch.nn as nn
 from typing import Optional, Tuple, List
 
-from src.core.language_zone.theta_gamma_encoding import ThetaGammaPositionalEncoding
-from src.core.language_zone.place_cell_encoder import PlaceCellSemanticEncoder
-from src.core.language_zone.hippocampal_layer import HippocampalTransformerLayer
+from core.language_zone.theta_gamma_encoding import ThetaGammaPositionalEncoding
+from core.language_zone.place_cell_encoder import PlaceCellSemanticEncoder
+from core.language_zone.hippocampal_layer import HippocampalTransformerLayer
 
 class HippocampalTransformer(nn.Module):
     """

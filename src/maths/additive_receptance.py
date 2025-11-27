@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Addition-only receptance gating mechanism
+Addition-only receptance gating mechanism.
+Optimized for memory efficiency.
 """
 
 import torch
@@ -8,7 +9,7 @@ import torch.nn as nn
 
 class AdditiveReceptance(nn.Module):
     """
-    Addition-only receptance gating mechanism
+    Addition-only receptance gating mechanism.
     """
     
     def __init__(self, d_model: int, d_ff: int):
@@ -26,30 +27,41 @@ class AdditiveReceptance(nn.Module):
         nn.init.uniform_(self.receptance_patterns, -0.1, 0.1)
         nn.init.zeros_(self.sigmoid_threshold)
     
-    def to(self, device):
-        """Override to method to ensure all parameters are moved to device"""
-        super().to(device)
-        self.receptance_patterns = self.receptance_patterns.to(device)
-        self.sigmoid_threshold = self.sigmoid_threshold.to(device)
-        return self
-    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Addition-only sigmoid approximation for receptance
+        Addition-only sigmoid approximation with memory-efficient chunking.
         """
-        # Ensure input is on the same device as parameters
-        x = x.to(self.receptance_patterns.device)
+        # Handle sequence dimension
+        original_shape = x.shape
+        if x.dim() == 3:
+            B, T, D = x.shape
+            x = x.reshape(B*T, D)
         
-        # L1 distance to patterns
-        x_expanded = x.unsqueeze(1)  # (batch, 1, d_model)
-        patterns_expanded = self.receptance_patterns.unsqueeze(0)  # (1, d_ff, d_model)
+        # Chunking configuration
+        chunk_size = 512
+        output_list = []
         
-        l1_distances = torch.sum(torch.abs(x_expanded - patterns_expanded), dim=2)
+        for i in range(0, self.d_ff, chunk_size):
+            end = min(i + chunk_size, self.d_ff)
+            
+            # Weights: [Chunk, D]
+            p_chunk = self.receptance_patterns[i:end]
+            
+            # L1 Distance: [Batch, 1, D] - [1, Chunk, D]
+            dist = torch.sum(torch.abs(x.unsqueeze(1) - p_chunk.unsqueeze(0)), dim=2)
+            
+            # Bias
+            thresh_chunk = self.sigmoid_threshold[i:end]
+            norm_dist = -dist + thresh_chunk
+            
+            # Sigmoid approx
+            sigmoid_approx = 0.5 + 0.25 * norm_dist
+            output_list.append(torch.clamp(sigmoid_approx, 0.0, 1.0))
+            
+        output = torch.cat(output_list, dim=1)
         
-        # Addition-only sigmoid approximation
-        # sigmoid(x) ≈ 0.5 + 0.25*x for small x, clipped to [0,1]
-        normalized_distances = -l1_distances + self.sigmoid_threshold
-        sigmoid_approx = 0.5 + 0.25 * normalized_distances
-        sigmoid_approx = torch.clamp(sigmoid_approx, 0.0, 1.0)
-        
-        return sigmoid_approx
+        # Restore shape
+        if len(original_shape) == 3:
+            output = output.view(B, T, self.d_ff)
+            
+        return output

@@ -1,288 +1,145 @@
-import numpy as np
-import asyncio
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
+"""
+GPU-Native Liquid Mixture-of-Experts Router.
+
+Optimizations:
+- Pure PyTorch implementation (replaces NumPy/SciPy/AsyncIO).
+- Batched execution for high throughput.
+- JIT-compatible gating network.
+"""
+
 import torch
-from scipy.special import softmax
-
-def softplus(x): return np.logaddexp(0, x)
-def tanh(x): return np.tanh(x)
+import torch.nn as nn
+import torch.nn.functional as F
+from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass
 
 @dataclass
-class EnergyMeter:
-    """Tracks energy consumption in Joules (J)"""
-    total_j: float = 0.0
-    def add_macs(self, n_macs: int):
-        # Approx 4.6pJ per MAC (32-bit float) on modern hardware
-        self.total_j += n_macs * 4.6e-12
-    def reset(self):
-        self.total_j = 0.0
+class LiquidCellConfig:
+    in_dim: int
+    hidden_dim: int
+    dt: float = 0.02
+    tau_min: float = 0.02
+    tau_max: float = 2.0
 
-# Bandit-based gating for expert selection
-class BanditGating:
-    """UCB-based bandit gating to track and select best-performing experts"""
-    def __init__(self, n_experts: int, exploration_factor: float = 2.0):
-        self.n_experts = n_experts
-        self.exploration_factor = exploration_factor
-        # Track rewards (negative errors) and counts for each expert
-        self.total_rewards = np.zeros(n_experts, dtype=np.float64)
-        self.selection_counts = np.ones(n_experts, dtype=np.float64)  # Start at 1 to avoid division by zero
-        self.total_selections = n_experts  # Total times any expert was selected
+class LiquidCell(nn.Module):
+    """
+    Differentiable Liquid Time-Constant (LTC) Cell.
+    """
+    def __init__(self, config: LiquidCellConfig):
+        super().__init__()
+        self.in_dim = config.in_dim
+        self.hidden_dim = config.hidden_dim
+        self.dt = config.dt
+        self.tau_min = config.tau_min
+        self.tau_max = config.tau_max
+        
+        # Parameters
+        self.W = nn.Linear(config.hidden_dim, config.hidden_dim)
+        self.U = nn.Linear(config.in_dim, config.hidden_dim)
+        self.V = nn.Linear(config.in_dim, config.hidden_dim)
+        
+        # Initialize
+        nn.init.xavier_uniform_(self.W.weight)
+        nn.init.xavier_uniform_(self.U.weight)
+        nn.init.xavier_uniform_(self.V.weight)
+        
+        self.register_buffer('h', torch.zeros(1, config.hidden_dim))
 
-    def update(self, expert_idx: int, error: float):
-        """Update bandit statistics with expert performance"""
-        # Convert error to reward (lower error = higher reward)
-        reward = 1.0 / (1.0 + abs(error))  # Reward in [0, 1]
-        self.total_rewards[expert_idx] += reward
-        self.selection_counts[expert_idx] += 1.0
-        self.total_selections += 1
-
-    def get_ucb_scores(self) -> np.ndarray:
-        """Compute UCB scores for all experts"""
-        # Average reward
-        avg_rewards = self.total_rewards / self.selection_counts
-
-        # Confidence bound
-        confidence = self.exploration_factor * np.sqrt(
-            np.log(self.total_selections + 1) / self.selection_counts
-        )
-
-        # UCB = average reward + confidence bound
-        ucb_scores = avg_rewards + confidence
-        return ucb_scores
-
-    def select_top_k(self, k: int, base_gates: np.ndarray) -> tuple:
-        """Select top-k experts using UCB scores, modulated by base gates"""
-        ucb_scores = self.get_ucb_scores()
-
-        # Combine UCB scores with base gates (weighted combination)
-        # UCB provides exploration/exploitation, gates provide input-specific routing
-        combined_scores = 0.7 * base_gates + 0.3 * ucb_scores
-
-        # Select top-k
-        topk_idx = np.argsort(combined_scores)[-k:][::-1]
-
-        # Normalize gates
-        topk_gates = combined_scores[topk_idx]
-        topk_gates = np.maximum(topk_gates, 0.0)  # Ensure non-negative
-        gate_sum = np.sum(topk_gates)
-        if gate_sum > 0:
-            topk_gates = topk_gates / gate_sum
+    def reset_state(self, batch_size: int = 1):
+        if self.h.size(0) != batch_size:
+            self.h = torch.zeros(batch_size, self.hidden_dim, device=self.W.weight.device)
         else:
-            topk_gates = np.ones(k) / k  # Uniform if all zero
+            self.h.zero_()
 
-        return topk_idx, topk_gates
-
-    def reset(self):
-        """Reset bandit statistics"""
-        self.total_rewards.fill(0.0)
-        self.selection_counts.fill(1.0)
-        self.total_selections = self.n_experts
-
-@dataclass
-class LiquidCell:
-    in_dim: int; hidden_dim: int; dt: float = 0.02
-    tau_min: float = 0.02; tau_max: float = 2.0
-    rng: np.random.Generator = field(default_factory=lambda: np.random.default_rng(1337))
-    W: np.ndarray = field(init=False); U: np.ndarray = field(init=False)
-    b: np.ndarray = field(init=False); V: np.ndarray = field(init=False)
-    c: np.ndarray = field(init=False); h: np.ndarray = field(init=False)
-    def __post_init__(self):
-        self.W = self.rng.normal(0, np.sqrt(2.0/(self.hidden_dim+self.hidden_dim)), (self.hidden_dim, self.hidden_dim))
-        self.U = self.rng.normal(0, np.sqrt(2.0/(self.in_dim+self.hidden_dim)), (self.hidden_dim, self.in_dim))
-        self.b = np.zeros((self.hidden_dim,), dtype=np.float64)
-        self.V = self.rng.normal(0, np.sqrt(2.0/(self.in_dim+self.hidden_dim)), (self.hidden_dim, self.in_dim))
-        self.c = self.rng.normal(0, 0.1, (self.hidden_dim,))
-        self.h = np.zeros((self.hidden_dim,), dtype=np.float64)
-    def reset(self): self.h[:] = 0.0
-    def step(self, x: np.ndarray, energy: Optional[EnergyMeter] = None) -> np.ndarray:
-        x = np.asarray(x, dtype=np.float64).reshape(-1)
-        vx = self.V @ x + self.c; tau = self.tau_min + softplus(vx)
-        tau = np.minimum(tau, self.tau_max)
-        Wh = self.W @ self.h; Ux = self.U @ x
-        a = tanh(Wh + Ux + self.b); dh = - self.h / np.maximum(tau, 1e-6) + a
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward step.
+        x: [Batch, In_Dim]
+        """
+        batch_size = x.size(0)
+        if self.h.size(0) != batch_size:
+            self.reset_state(batch_size)
+            
+        # Compute time constant
+        # tau = tau_min + softplus(V*x + c)
+        vx = self.V(x)
+        tau = self.tau_min + F.softplus(vx)
+        tau = torch.clamp(tau, max=self.tau_max)
+        
+        # Compute dynamics
+        # dh/dt = -h/tau + tanh(W*h + U*x + b)
+        gates = torch.tanh(self.W(self.h) + self.U(x))
+        dh = -self.h / (tau + 1e-6) + gates
+        
+        # Euler step
         self.h = self.h + self.dt * dh
-        if energy is not None: energy.add_macs((self.hidden_dim*self.hidden_dim) + (self.hidden_dim*self.in_dim))
-        return self.h.copy()
-    def state_dict(self) -> Dict: return {"W": self.W, "U": self.U, "b": self.b, "V": self.V, "c": self.c, "h": self.h}
-    def load_state_dict(self, state: Dict):
-        self.W = state["W"]; self.U = state["U"]; self.b = state["b"]
-        self.V = state["V"]; self.c = state["c"]; self.h = state["h"]
+        return self.h
 
-@dataclass
-class LiquidGatingNetwork:
-    in_dim: int; hidden_dim: int; n_experts: int
-    top_k: int = 2; temperature: float = 1.0
-    usage_smoothing: float = 0.99; bias_lr: float = 0.01
-    usage_beta: float = 0.5
-    cell: LiquidCell = field(init=False); Wg: np.ndarray = field(init=False)
-    bg: np.ndarray = field(init=False); usage_ma: np.ndarray = field(init=False)
-    rng: np.random.Generator = field(default_factory=lambda: np.random.default_rng(2025))
-    energy: EnergyMeter = field(default_factory=EnergyMeter)
-    def __post_init__(self):
-        self.cell = LiquidCell(self.in_dim, self.hidden_dim, rng=self.rng)
-        self.Wg = self.rng.normal(0, np.sqrt(2.0/(self.hidden_dim+self.n_experts)), (self.n_experts, self.hidden_dim))
-        self.bg = np.zeros((self.n_experts,), dtype=np.float64)
-        self.usage_ma = np.zeros((self.n_experts,), dtype=np.float64)
-        self._lock = asyncio.Lock()
-    async def forward(self, x: np.ndarray, attn_gain: float = 1.0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        async with self._lock:
-            h = self.cell.step(x, self.energy)
-            logits = (self.Wg @ h) + self.bg
-            
-            # Apply usage bias (if enabled)
-            if self.usage_beta > 0:
-                logits = self._apply_usage_bias(logits)
-            
-            # CRITICAL FIX: Apply temperature scaling with attn_gain
-            # Design choice: high prosody (high attn_gain) -> lower temp -> sharper distribution (focused)
-            #                low prosody (low attn_gain) -> higher temp -> flatter distribution (exploratory)
-            temp = max(0.2, self.temperature / max(1e-6, attn_gain))
-            logits_scaled = logits / temp
-            
-            # Softmax with temperature applied
-            probs = np.exp(logits_scaled - np.max(logits_scaled))
-            probs = probs / np.sum(probs)
-            
-            k = max(1, min(self.top_k, self.n_experts))
-            topk_idx = np.argpartition(probs, -k)[-k:]
-            topk_probs = probs[topk_idx]
-            if topk_probs.sum() <= 1e-12: gates = np.ones_like(topk_probs) / len(topk_probs)
-            else: gates = topk_probs / topk_probs.sum()
-            out = np.zeros_like(probs); out[topk_idx] = gates
-            eps = 0.01
-            if self.n_experts > 0 and eps > 0:
-                j = int(np.argmin(self.usage_ma)); out = (1.0 - eps) * out; out[j] += eps
-            self.usage_ma = self.usage_smoothing * self.usage_ma + (1.0 - self.usage_smoothing) * out
-            # Track last winners for dopamine reward
-            self.last_winners = topk_idx
-            return out, topk_idx, probs
-    def _apply_usage_bias(self, logits: np.ndarray) -> np.ndarray:
-        eps = 1e-6; target = 1.0 / self.n_experts
-        inv_usage = target / (self.usage_ma + eps)
-        return logits + self.usage_beta * np.log(inv_usage)
-    async def apply_endocrine(self, *, cortisol: float = 0.0, gh: float = 0.0,
-                             thyroid: float = 1.0, dopamine: float = 0.0, eps: Optional[float] = None) -> None:
-        """Apply endocrine modulation to gating network"""
-        async with self._lock:
-            # Temperature ↑ with cortisol (stress) — clamp for stability
-            self.temperature = float(np.clip(self.temperature * (1.0 + 0.30 * cortisol), 0.5, 2.5))
+class LiquidMoERouter(nn.Module):
+    """
+    Liquid MoE Router (GPU Native).
+    Routes inputs to top-k experts based on liquid dynamics.
+    """
+    def __init__(self, in_dim: int, hidden_dim: int, num_experts: int, top_k: int = 2):
+        super().__init__()
+        self.top_k = top_k
+        self.num_experts = num_experts
+        
+        # Liquid Gating Network
+        config = LiquidCellConfig(in_dim, hidden_dim)
+        self.cell = LiquidCell(config)
+        
+        # Project hidden state to expert logits
+        self.gate_proj = nn.Linear(hidden_dim, num_experts)
+        
+        # Usage tracking (for load balancing)
+        self.register_buffer('expert_usage', torch.zeros(num_experts))
+        self.temperature = 1.0
 
-            # Bias LR scales with thyroid (metabolic rate around 1.0 baseline)
-            self.bias_lr = float(np.clip(self.bias_lr * (1.0 + 0.40 * (thyroid - 1.0)), 1e-4, 0.1))
-
-            # Top-K capacity expands with GH (growth hormone), but never beyond n_experts
-            base_top_k = getattr(self, 'base_top_k', self.top_k)
-            self.base_top_k = base_top_k
-            self.top_k = int(np.clip(round(base_top_k * (1.0 + 0.20 * gh)), 1, self.n_experts))
-
-            # Dopamine: nudge most recent winners' biases (reward)
-            if dopamine > 0 and hasattr(self, 'last_winners') and self.last_winners is not None:
-                self.bg[self.last_winners] += 0.10 * float(dopamine)
-
-            # Optional: exploration epsilon override
-            if eps is not None:
-                self.eps = float(np.clip(eps, 0.0, 0.05))
-    async def nudge_for_load_balance(self) -> None:
-        async with self._lock:
-            if self.n_experts <= 0: return
-            target = 1.0 / float(self.n_experts); delta = target - self.usage_ma
-            self.bg += self.bias_lr * delta
-    def reset(self): self.cell.reset(); self.usage_ma[:] = 0.0; self.energy.reset()
-    def state_dict(self) -> Dict:
-        return {"cell": self.cell.state_dict(), "Wg": self.Wg, "bg": self.bg, "usage_ma": self.usage_ma}
-    def load_state_dict(self, state: Dict):
-        self.cell.load_state_dict(state["cell"]); self.Wg = state["Wg"]; self.bg = state["bg"]; self.usage_ma = state["usage_ma"]
-
-@dataclass
-class LiquidMoERouter:
-    experts: Dict[str, Any] # Type Any to avoid circular import with ExpertNLMSAdapter
-    in_dim: int; hidden_dim: int; top_k: int = 2
-    temperature: float = 1.0
-    gating: LiquidGatingNetwork = field(init=False)
-    bandit: BanditGating = field(init=False)
-    names: List[str] = field(init=False)
-    energy: EnergyMeter = field(default_factory=EnergyMeter)
-    use_bandit: bool = True  # Enable bandit gating
-    def __post_init__(self):
-        self.names = list(self.experts.keys())
-        self.gating = LiquidGatingNetwork(
-            in_dim=self.in_dim, hidden_dim=self.hidden_dim,
-            n_experts=len(self.names), top_k=self.top_k,
-            temperature=self.temperature,
-        )
-        self.bandit = BanditGating(n_experts=len(self.names), exploration_factor=2.0)
-    async def route(self, x: np.ndarray, attn_gain: float = 1.0) -> Dict[str, any]:
-        gates_sparse, topk_idx_base, probs = await self.gating.forward(x, attn_gain=attn_gain)
-
-        # Use bandit gating if enabled
-        if self.use_bandit:
-            # Convert sparse gates to dense for bandit
-            gates_dense = np.zeros(len(self.names), dtype=np.float64)
-            for i, idx in enumerate(topk_idx_base):
-                gates_dense[int(idx)] = float(gates_sparse[i])
-
-            # Get bandit-selected experts
-            topk_idx, topk_gates = self.bandit.select_top_k(self.top_k, gates_dense)
-
-            # Update gates_sparse and topk_idx
-            gates_sparse = topk_gates
-            topk_idx = topk_idx
+    def forward(self, x: torch.Tensor, attn_gain: Optional[torch.Tensor] = None) -> Dict[str, Any]:
+        """
+        Route inputs to experts.
+        Args:
+            x: Input features [Batch, In_Dim]
+            attn_gain: Optional gain modulation from Prosody [Batch, 1]
+        """
+        # 1. Update Liquid State
+        h = self.cell(x)
+        
+        # 2. Compute Logits
+        logits = self.gate_proj(h)
+        
+        # 3. Apply Temperature Scaling (modulated by attention/prosody)
+        # High attention -> Low temp -> Sharper focus
+        if attn_gain is not None:
+            # attn_gain shape: [Batch] or [Batch, 1]
+            if attn_gain.dim() == 1: attn_gain = attn_gain.unsqueeze(1)
+            temp = torch.clamp(self.temperature / (attn_gain + 1e-6), min=0.1, max=5.0)
+            logits = logits / temp
         else:
-            topk_idx = topk_idx_base
-
-        chosen = [(self.names[i], float(gates_sparse[j])) for j, i in enumerate(topk_idx)]
-        y = 0.0; per_expert: Dict[str, Dict[str, float]] = {}
-        for j, i in enumerate(topk_idx):
-            name = self.names[int(i)]; gate = float(gates_sparse[j])
-            pred = float(self.experts[name].predict(x)); y += gate * pred
-            self.energy.add_macs(self.in_dim); per_expert[name] = {"gate": gate, "pred": pred}
-        return {'y_hat': float(y), 'topk': chosen, 'probs': probs, 'per_expert': per_expert,
-            'energy_j': self.energy.total_j + self.gating.energy.total_j}
-    async def learn(self, x: np.ndarray, token_ids: List[int], y_true: float,
-                    attn_gain: float = 1.0, attention_bundle: Optional[Dict[str, Any]] = None) -> Dict[str, any]:
-        out = await self.route(x, attn_gain=attn_gain); tasks = []
-        expert_errors = {}  # Track errors for bandit updates
-
-        for name, info in out['per_expert'].items():
-            gate = float(info['gate']);
-            if gate <= 0.0: continue
-            target = float(y_true)
-            pred = float(info['pred'])
-            error = abs(target - pred)
-            expert_errors[name] = error
-            tasks.append(self.experts[name].update(x, target, token_ids, attention_bundle))
-
-        await asyncio.gather(*tasks)
-
-        # Update bandit with expert performance
-        if self.use_bandit:
-            for name, error in expert_errors.items():
-                if name in self.names:
-                    expert_idx = self.names.index(name)
-                    self.bandit.update(expert_idx, error)
-
-        await self.gating.nudge_for_load_balance(); return out
-    def reset(self):
-        self.gating.reset()
-        self.energy.reset()
-        if self.use_bandit:
-            self.bandit.reset()
-    def state_dict(self) -> Dict:
-        expert_states = {name: expert.state_dict() for name, expert in self.experts.items()}
-        bandit_state = {
-            "total_rewards": self.bandit.total_rewards.tolist(),
-            "selection_counts": self.bandit.selection_counts.tolist(),
-            "total_selections": self.bandit.total_selections
-        } if self.use_bandit else None
-        return {"gating": self.gating.state_dict(), "experts": expert_states, "bandit": bandit_state}
-    def load_state_dict(self, state: Dict):
-        self.gating.load_state_dict(state["gating"])
-        for name, expert_state in state["experts"].items():
-            if name in self.experts: self.experts[name].load_state_dict(expert_state)
-        if self.use_bandit and "bandit" in state and state["bandit"]:
-            bandit_state = state["bandit"]
-            self.bandit.total_rewards = np.array(bandit_state["total_rewards"])
-            self.bandit.selection_counts = np.array(bandit_state["selection_counts"])
-            self.bandit.total_selections = bandit_state["total_selections"]
-
+            logits = logits / self.temperature
+            
+        # 4. Softmax
+        probs = F.softmax(logits, dim=-1)
+        
+        # 5. Top-K Selection
+        topk_probs, topk_indices = torch.topk(probs, self.top_k, dim=-1)
+        
+        # Normalize weights
+        topk_weights = topk_probs / (topk_probs.sum(dim=-1, keepdim=True) + 1e-8)
+        
+        # 6. Update Usage Stats (EMA)
+        with torch.no_grad():
+            batch_usage = torch.zeros_like(self.expert_usage)
+            # Scatter add usage counts
+            # Flatten indices to scatter
+            flat_indices = topk_indices.view(-1)
+            batch_usage.scatter_add_(0, flat_indices, torch.ones_like(flat_indices, dtype=torch.float))
+            # EMA Update
+            self.expert_usage = 0.99 * self.expert_usage + 0.01 * (batch_usage / x.size(0))
+            
+        return {
+            'weights': topk_weights,  # [Batch, k]
+            'indices': topk_indices,  # [Batch, k]
+            'probs': probs            # [Batch, Num_Experts]
+        }

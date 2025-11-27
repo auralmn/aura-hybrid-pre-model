@@ -3,7 +3,7 @@
 Neuromorphic Brain System Orchestrator
 
 - Integrates EventBus, NeuromorphicProcessor, neuromorphic brain zones
-- Optionally wires ContinuousLearningOrchestrator and plasticity engine from src.base.snn_processor
+- Optionally wires ContinuousLearningOrchestrator and plasticity engine from base.snn_processor
 - Safe to import; no background tasks started automatically
 """
 
@@ -14,14 +14,14 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 
-from src.base.events import EventBus
-from src.base.snn_processor import NeuromorphicProcessor, ProcessingMode
-from src.base.snn_brain_zones import (
+from base.events import EventBus
+from base.snn_processor import NeuromorphicProcessor, ProcessingMode
+from base.snn_brain_zones import (
     NeuromorphicBrainZone,
     BrainZoneType,
     BrainZoneConfig,
 )
-from src.base.snn_brain_stats import BrainStats
+from base.snn_brain_stats import BrainStats
 
 try:
     from services.continuous_learning import (

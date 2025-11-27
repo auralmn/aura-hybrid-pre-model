@@ -5,7 +5,7 @@ from core.brain import create_aura_brain
 
 
 def test_create_aura_brain_neuromorphic_flow_shapes():
-    brain = create_aura_brain(d_model=128, use_neuromorphic=True)
+    brain = create_aura_brain(d_model=128)
     x = torch.randn(2, 7, 128)
     out, info = brain.process_input(x, text_context='analyze memory language')
     assert out.shape == (2, 7, 128)
@@ -13,7 +13,7 @@ def test_create_aura_brain_neuromorphic_flow_shapes():
 
 
 def test_brain_statistics_updates_with_zone_activity():
-    brain = create_aura_brain(d_model=64, use_neuromorphic=True)
+    brain = create_aura_brain(d_model=64)
     x = torch.ones(1, 4, 64) * 0.4
     out, info = brain.process_input(x, text_context='analyze')
     stats = brain.get_brain_statistics()

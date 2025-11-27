@@ -13,11 +13,11 @@ import os
 # Add modules to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from src.maths.addition_linear import AdditionLinear
-from src.maths.additive_receptance import AdditiveReceptance
-from src.maths.sign_activation import SignActivation
+from maths.addition_linear import AdditionLinear
+from maths.additive_receptance import AdditiveReceptance
+from maths.sign_activation import SignActivation
 
-from src.maths.frequency_encoder import FrequencyPatternEncoder
+from maths.frequency_encoder import FrequencyPatternEncoder
 
 class DualLayerSRFFN(nn.Module):
     """

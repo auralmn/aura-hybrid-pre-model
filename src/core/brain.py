@@ -19,34 +19,34 @@ import os
 import asyncio
 
 # Your existing imports
-from src.core.layers_factory import LayersFactory
-from src.core.neuron_factory import NeuronFactory
-from src.base.snn_layers import BaseLayerConfig, BaseLayerContainer, BaseLayerContainerConfig
-from src.base.neuron import NeuronalState
-from src.base.snn_brain_zones import BrainZone, BrainZoneConfig
-from src.base.brain_zone_factory import BrainZoneFactory
+from .layers_factory import LayersFactory
+from .neuron_factory import NeuronFactory
+from base.snn_layers import BaseLayerConfig, BaseLayerContainer, BaseLayerContainerConfig
+from base.neuron import NeuronalState
+from base.snn_brain_zones import BrainZone, BrainZoneConfig
+from base.brain_zone_factory import BrainZoneFactory
 
 # Enhanced imports
-from src.base.snn_brain_zones import (
+from base.snn_brain_zones import (
     NeuromorphicBrainZone,
     BrainZoneType,
 )
-from src.base.snn_brain_stats import BrainStats, StatsCollector
-from src.base.snn_processor import NeuromorphicProcessor, ContentRouter, ProcessingMode
-from src.base.snn_layers import BaseLayerFactory, create_neuromorphic_layer_stack
-from src.base.events import EventBus
+from base.snn_brain_stats import BrainStats, StatsCollector
+from base.snn_processor import NeuromorphicProcessor, ContentRouter, ProcessingMode
+from base.snn_layers import BaseLayerFactory, create_neuromorphic_layer_stack
+from base.events import EventBus
 
 # Liquid MoE and Learning Components
-from src.core.liquid_moe import LiquidMoERouter
-from src.core.experts import ExpertNLMSHead, NLMSExpertAdapter
-from src.training.hebbian_layer import OjaLayer
-from src.training.optimized_whitener import OptimizedWhitener
-from src.encoders.fast_hash_embedder import FastHashEmbedder
-from src.training.memory_manager import maybe_empty_cuda_cache
+from core.liquid_moe import LiquidMoERouter
+from core.experts import ExpertHead, NLMSExpertAdapter
+from training.hebbian_layer import OjaLayer
+from training.optimized_whitener import OptimizedWhitener
+from encoders.fast_hash_embedder import FastHashEmbedder
+from training.memory_manager import maybe_empty_cuda_cache
 
 # Optional continuous learning orchestrator
 try:
-    from src.services.continuous_learning import (
+    from services.continuous_learning import (
         ContinuousLearningOrchestrator,
         create_default_feeds,
         RSSFeedConfig,
@@ -56,442 +56,159 @@ except Exception:
     create_default_feeds = None  # type: ignore
     RSSFeedConfig = None  # type: ignore
 
-class EnhancedBrain:
-    """Enhanced Brain class with neuromorphic capabilities"""
-    
-    # Your original attributes
-    layers_factory: LayersFactory
-    neuron_factory: NeuronFactory
-    zone_factory: BrainZoneFactory
-    
-    # Enhanced attributes
-    enhanced_zones: Dict[str, NeuromorphicBrainZone]
-    neuromorphic_processor: NeuromorphicProcessor
-    content_router: ContentRouter
-    event_bus: EventBus
-    stats_collector: StatsCollector
-    
+"""
+Enhanced Brain (GPU-Optimized Integration).
+"""
+
+import torch
+import torch.nn as nn
+from typing import Dict, Any, Optional, Tuple, List
+from dataclasses import dataclass
+
+# Use optimized components
+from core.liquid_moe import LiquidMoERouter
+from base.snn_brain_zones import NeuromorphicBrainZone, BrainZoneConfig, BrainZoneType
+from base.events import EventBus
+
+class EnhancedBrain(nn.Module):
+    """
+    Main Brain Module.
+    Integrates multiple Brain Zones (Cortical, Hippocampal, etc.) on GPU.
+    """
     def __init__(self, 
-                 config: BaseLayerContainerConfig, 
-                 zones: Dict[str, BrainZoneConfig],
-                 d_model: int = 1024,
-                 use_neuromorphic: bool = True,
-                 processing_mode: ProcessingMode = ProcessingMode.NEUROMORPHIC):
-        
-        # Initialize your original components
-        self.layers_factory = LayersFactory(config)
-        self.neuron_factory = NeuronFactory(256, 512, 768, 0.02, 0.02, 2.0)
-        self.zone_factory = BrainZoneFactory()
-        
-        # Enhanced initialization
+                 d_model: int = 1024, 
+                 zones_config: Dict[str, BrainZoneConfig] = None,
+                 device: str = 'cuda'):
+        super().__init__()
         self.d_model = d_model
-        self.use_neuromorphic = use_neuromorphic
-        self.processing_mode = processing_mode
-        
-        # Event system for monitoring
+        self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         self.event_bus = EventBus()
         
-        # Statistics collection
-        self.stats_collector = StatsCollector()
+        # Initialize Zones as ModuleDict (automatically registered)
+        self.zones = nn.ModuleDict()
         
-        # Content routing
-        self.content_router = ContentRouter()
+        if zones_config:
+            for name, config in zones_config.items():
+                # Ensure config matches model dim
+                config.d_model = d_model
+                config.name = name
+                # Create GPU-native zone
+                self.zones[name] = NeuromorphicBrainZone(config).to(self.device)
+                
+        # Global Router (Liquid State Machine)
+        # Routes signals between zones based on content
+        self.global_router = LiquidMoERouter(
+            in_dim=d_model,
+            hidden_dim=256,
+            num_experts=len(self.zones) if self.zones else 1,
+            top_k=min(3, len(self.zones))
+        ).to(self.device)
         
-        # Initialize zones (your existing logic + enhancements)
-        self.zones = {}
-        self.enhanced_zones = {}
-        # Optional continuous learning orchestrator (not started by default)
-        self.learning_orchestrator = None
-        
-        for zone_name, zone_config in zones.items():
-            
-            # Create your original zone
-            original_zone = self.create_brain_zone(zone_config)
-            self.zones[zone_name] = original_zone
-            
-            # Create enhanced neuromorphic version if enabled
-            if use_neuromorphic:
-                enhanced_zone = self._create_enhanced_zone(zone_name, zone_config)
-                if enhanced_zone:
-                    self.enhanced_zones[zone_name] = enhanced_zone
-        
-        # Set zone attributes (your existing logic)
-        self._set_zone_attributes()
-        
-        # Initialize neuromorphic processor
-        if use_neuromorphic and self.enhanced_zones:
-            self.neuromorphic_processor = NeuromorphicProcessor(
-                d_model=d_model,
-                processing_mode=processing_mode,
-                event_bus=self.event_bus
-            )
-            self.neuromorphic_processor.set_zone_processors(self.enhanced_zones)
-            # Default zone capabilities for planning
-            self.neuromorphic_processor.set_zone_capabilities({
-                'prefrontal_cortex': ['reasoning', 'analytical'],
-                'temporal_cortex': ['language', 'creative', 'semantic'],
-                'hippocampus': ['memory', 'temporal', 'context'],
-                'cerebellum': ['precise', 'refine']
-            })
-        else:
-            self.neuromorphic_processor = None
-        
-        # Subscribe to events for statistics
-        self.event_bus.subscribe('neuron_fired', self._handle_neuron_fired)
-        self.event_bus.subscribe('brain_stats_updated', self._handle_stats_updated)
-    
-    # -----------------------------
-    # Continuous learning integration (optional)
-    # -----------------------------
-    def attach_continuous_learning(self, feeds: Optional[List["RSSFeedConfig"]] = None) -> None:
-        """Attach the RSS-based continuous learning orchestrator to this brain.
+        self.zone_names = list(self.zones.keys())
 
-        This will NOT start background loops automatically. Call
-        start_continuous_learning/stop_continuous_learning explicitly.
-        """
-        if ContinuousLearningOrchestrator is None:
-            return
-        if not getattr(self, 'neuromorphic_processor', None):
-            return
-        if self.learning_orchestrator is None:
-            self.learning_orchestrator = ContinuousLearningOrchestrator(
-                self.neuromorphic_processor,
-                self.event_bus,
-            )
-        if feeds is None and create_default_feeds is not None:
-            try:
-                feeds = create_default_feeds()
-            except Exception:
-                feeds = None
-        if feeds:
-            for feed in feeds:
-                try:
-                    self.learning_orchestrator.add_feed(feed)
-                except Exception:
-                    continue
-
-    async def start_continuous_learning(self) -> None:
-        if self.learning_orchestrator is not None:
-            try:
-                await self.learning_orchestrator.start()
-            except Exception:
-                pass
-
-    async def stop_continuous_learning(self) -> None:
-        if self.learning_orchestrator is not None:
-            try:
-                await self.learning_orchestrator.stop()
-            except Exception:
-                pass
-    
-    def _create_enhanced_zone(self, zone_name: str, zone_config: BrainZoneConfig) -> Optional[NeuromorphicBrainZone]:
-        """Create enhanced neuromorphic version of brain zone"""
-        
-        # Map zone names to types
-        zone_type_mapping = {
-            'prefrontal_cortex': BrainZoneType.PREFRONTAL_CORTEX,
-            'temporal_cortex': BrainZoneType.TEMPORAL_CORTEX,
-            'hippocampus': BrainZoneType.HIPPOCAMPUS,
-            'cerebellum': BrainZoneType.CEREBELLUM,
-            'thalamus': BrainZoneType.THALAMUS,
-            'amygdala': BrainZoneType.AMYGDALA,
-            'basal_ganglia': BrainZoneType.BASAL_GANGLIA,
-            'brainstem': BrainZoneType.BRAINSTEM,
-            'occipital_cortex': BrainZoneType.OCCIPITAL_CORTEX,
-            'parietal_cortex': BrainZoneType.PARIETAL_CORTEX,
-            'insular_cortex': BrainZoneType.INSULAR_CORTEX,
-        }
-        
-        zone_type = zone_type_mapping.get(zone_name)
-        if not zone_type:
-            print(f"No neuromorphic mapping for zone {zone_name}, skipping enhancement")
-            return None
-        
-        # Create enhanced configuration
-        enhanced_config = BrainZoneConfig(
-            name=zone_name,
-            max_neurons=zone_config.max_neurons,
-            min_neurons=zone_config.min_neurons,
-            num_layers=zone_config.num_layers,
-            zone_type=zone_type,
-            d_model=self.d_model,
-            use_spiking=True,
-            event_bus=self.event_bus
-        )
-        
-        return NeuromorphicBrainZone(enhanced_config)
-    
-    def _set_zone_attributes(self):
-        """Set individual zone attributes (your existing logic)"""
-        if 'cortex' in self.zones:
-            self.cortex_zone = self.zones['cortex']
-        if 'cns' in self.zones:
-            self.cns_zone = self.zones['cns']
-        if 'thalamus' in self.zones:
-            self.thalamus_zone = self.zones['thalamus']
-        if 'hypothalamus' in self.zones:
-            self.hypothalamus_zone = self.zones['hypothalamus']
-        if 'brainstem' in self.zones:
-            self.brainstem_zone = self.zones['brainstem']
-        if 'cerebellum' in self.zones:
-            self.cerebellum_zone = self.zones['cerebellum']
-        if 'hippocampus' in self.zones:
-            self.hippocampus_zone = self.zones['hippocampus']
-        if 'amygdala' in self.zones:
-            self.amygdala_zone = self.zones['amygdala']
-        if 'prefrontal_cortex' in self.zones:
-            self.prefrontal_cortex_zone = self.zones['prefrontal_cortex']
-        if 'parietal_cortex' in self.zones:
-            self.parietal_cortex_zone = self.zones['parietal_cortex']
-        if 'occipital_cortex' in self.zones:
-            self.occipital_cortex_zone = self.zones['occipital_cortex']
-        if 'temporal_cortex' in self.zones:
-            self.temporal_cortex_zone = self.zones['temporal_cortex']
-        if 'insular_cortex' in self.zones:
-            self.insular_cortex_zone = self.zones['insular_cortex']
-        if 'basal_ganglia' in self.zones:
-            self.basal_ganglia_zone = self.zones['basal_ganglia']
-    
-    def create_layers(self, config: BaseLayerContainerConfig) -> BaseLayerContainer:
-        """Your existing create_layers method with enhancements"""
-        # Your existing factory config logic
-        factory_config = getattr(self.layers_factory, 'config', None)
-        if factory_config is not None:
-            num_layers = getattr(factory_config, 'num_layers', None)
-            if not isinstance(num_layers, int):
-                try:
-                    setattr(factory_config, 'num_layers', 3)
-                except Exception:
-                    pass
-        
-        # Create layers using enhanced factory if neuromorphic enabled
-        if getattr(self, 'use_neuromorphic', False):
-            enhanced_factory = BaseLayerFactory(self.event_bus)
-            
-            # Create neuromorphic layer configurations
-            layer_configs = []
-            for i in range(config.num_layers):
-                layer_config = BaseLayerConfig(
-                    name=f"enhanced_layer_{i}",
-                    input_dim=self.d_model if i > 0 else 512,  # Adjust as needed
-                    output_dim=self.d_model,
-                    use_spiking=True,
-                    neuron_type="spiking"
-                )
-                layer_configs.append(layer_config)
-            
-            return enhanced_factory.create_layer_container(config, layer_configs)
-        else:
-            return self.layers_factory.create_layers(config)
-    
-    def create_brain_zone(self, config: BrainZoneConfig) -> BrainZone:
-        """Your existing create_brain_zone method"""
-        # Your existing logic
-        layer_container_config = BaseLayerContainerConfig(
-            num_layers=getattr(config, 'num_layers', 3),
-            layer_type=getattr(config, 'layer_type', 'dense')
-        )
-        
-        layer_config = BaseLayerConfig(
-            name=config.name, 
-            input_dim=config.min_neurons, 
-            output_dim=config.max_neurons
-        )
-        
-        layers = self.layers_factory.create_layers(layer_config)
-        
-        return self.zone_factory.create_brain_zone(config, layers)
-    
     def process_input(self, 
-                     input_embeddings: torch.Tensor,
-                     text_context: Optional[str] = None,
-                     content_context: Optional[Dict[str, Any]] = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
-        """Enhanced input processing through neuromorphic zones"""
+                      x: torch.Tensor, 
+                      text_context: Optional[str] = None,
+                      content_context: Optional[Dict[str, Any]] = None) -> Tuple[torch.Tensor, Dict[str, Any]]:
+        """
+        API-Compatible Processing Wrapper.
         
-        if not self.use_neuromorphic or not self.neuromorphic_processor:
-            # Fallback to basic processing
-            return self._basic_processing(input_embeddings)
+        Args:
+            x: Input embeddings [Batch, Seq_Len, Dim]
+            text_context: Optional text string (for legacy logging/routing fallback)
+            content_context: Optional dict with metadata (e.g. 'source', 'timestamp')
+            
+        Returns:
+            output: Processed tensor
+            info: Dictionary containing routing info, activity stats, etc.
+        """
+        # Ensure input is on correct device
+        if x.device != self.device:
+            x = x.to(self.device)
+            
+        # Run optimized forward pass
+        output, internal_info = self.forward(x, context=content_context)
         
-        # Process through neuromorphic processor
-        context = content_context or {}
-        if text_context:
-            context['text'] = text_context
-        
-        try:
-            output = self.neuromorphic_processor.process(input_embeddings, context)
-            
-            # Get processing stats which includes zone activities
-            processing_stats = self.neuromorphic_processor.get_processing_stats()
-            
-            # Extract zone activities from processing stats
-            zone_activities = processing_stats.get('zone_activities', {})
-            
-            # Update statistics
-            self.stats_collector.update_from_brain(self)
-            
-            processing_info = {
-                'mode': 'neuromorphic',
-                'zone_activities': zone_activities,
-                'content_routing': self.content_router.analyze_content(text_context or ""),
-                'processing_stats': processing_stats
-            }
-            
-            return output, processing_info
-            
-        except Exception as e:
-            print(f"Neuromorphic processing failed: {e}, falling back to basic processing")
-            return self._basic_processing(input_embeddings)
-    
-    def _basic_processing(self, input_embeddings: torch.Tensor) -> Tuple[torch.Tensor, Dict[str, Any]]:
-        """Basic fallback processing"""
-        # Simple pass-through or basic transformation
-        output = input_embeddings  # Could add basic processing here
-        
+        # Augment info with context for API compatibility
         info = {
-            'mode': 'basic',
-            'message': 'Using basic processing mode'
+            'mode': 'neuromorphic_gpu',
+            'routing': internal_info['routing'],
+            'zone_activities': internal_info['activity'],
+            'text_context': text_context,
+            'content_context': content_context or {}
         }
         
         return output, info
-    
-    def get_brain_statistics(self) -> BrainStats:
-        """Get comprehensive brain statistics"""
+
+    def forward(self, x: torch.Tensor, context: Optional[Dict] = None) -> Tuple[torch.Tensor, Dict]:
+        """
+        Process input through the brain (GPU Optimized).
+        Args:
+            x: Input embeddings [Batch, Seq_Len, Dim]
+        """
+        batch_size, seq_len, _ = x.shape
         
-        # Update basic statistics
-        stats = self.stats_collector.get_stats()
-        stats.num_zones = len(self.zones)
-        stats.num_layers = 0
+        # 1. Global Routing (Per-token or Per-Sequence?)
+        # For efficiency, we pool the sequence to route
+        # [Batch, Seq, Dim] -> [Batch, Dim]
+        pooled_x = x.mean(dim=1)
         
-        # Count neurons from enhanced zones
-        total_neurons = 0
-        for zone in self.enhanced_zones.values():
-            if hasattr(zone, 'neuron_counts'):
-                total_neurons += sum(zone.neuron_counts.values())
-                
-                stats.num_layers += zone.config.num_layers
+        routing_out = self.global_router(pooled_x)
+        topk_indices = routing_out['indices'] # [Batch, k]
+        topk_weights = routing_out['weights'] # [Batch, k]
         
-        if total_neurons > 0:
-            stats.num_neurons = total_neurons
+        # 2. Dispatch to Zones
+        zone_outputs = torch.zeros_like(x)
+        total_activity = {}
         
-        # Update with current zone activities
-        if self.enhanced_zones:
-            zone_activities = {}
-            for zone_name, zone in self.enhanced_zones.items():
-                zone_activities[zone_name] = zone.get_activity_stats()
+        # Iterate unique active zones in this batch to save compute
+        active_indices = torch.unique(topk_indices)
+        
+        for idx in active_indices:
+            zone_idx = idx.item()
+            if zone_idx >= len(self.zone_names): continue
             
-            if zone_activities:
-                stats.update_from_zone_activity(zone_activities)
+            zone_name = self.zone_names[zone_idx]
+            zone_module = self.zones[zone_name]
+            
+            # Forward pass through zone
+            # [Batch, Seq, Dim]
+            z_out, z_stats = zone_module(x)
+            
+            # Masking: Apply contribution only where this zone was selected
+            # Mask: [Batch, 1, 1]
+            mask = (topk_indices == idx).any(dim=1).float().view(batch_size, 1, 1)
+            
+            # Weighted combination
+            # Sum weights where selected (usually selected once)
+            # w: [Batch, 1]
+            is_selected = (topk_indices == idx) # [Batch, k]
+            w = (topk_weights * is_selected.float()).sum(dim=1).view(batch_size, 1, 1)
+            
+            zone_outputs += z_out * w
+            total_activity[zone_name] = z_stats.get('avg_firing_rate', 0.0)
+            
+        # 3. Residual / Skip Connection
+        output = x + zone_outputs
         
-        return stats
-    
-    def check_training_stability(self) -> Dict[str, str]:
-        """Check training stability across all zones"""
-        stability_report = {}
-        
-        for zone_name, zone in self.enhanced_zones.items():
-            if hasattr(zone, 'check_zone_health'):
-                zone_health = zone.check_zone_health()
-                stability_report.update({f"{zone_name}_{k}": v for k, v in zone_health.items()})
-        
-        # Overall stability assessment
-        silent_count = sum(1 for status in stability_report.values() if status == "silent")
-        hyperactive_count = sum(1 for status in stability_report.values() if status == "hyperactive")
-        
-        if silent_count > len(stability_report) * 0.3:
-            stability_report['overall'] = 'too_many_silent'
-        elif hyperactive_count > len(stability_report) * 0.3:
-            stability_report['overall'] = 'too_many_hyperactive'
-        else:
-            stability_report['overall'] = 'stable'
-        
-        return stability_report
-    
-    def adjust_for_stability(self, stability_report: Dict[str, str]):
-        """Auto-adjust parameters based on stability report"""
-        
-        for param_name, status in stability_report.items():
-            if status == "silent" and "_" in param_name:
-                zone_name, neuron_type = param_name.rsplit("_", 1)
-                self._increase_surrogate_slope(zone_name, neuron_type)
-            elif status == "hyperactive" and "_" in param_name:
-                zone_name, neuron_type = param_name.rsplit("_", 1)
-                self._decrease_surrogate_slope(zone_name, neuron_type)
-    
-    def _increase_surrogate_slope(self, zone_name: str, neuron_type: str):
-        """Increase surrogate slope for silent neurons"""
-        if zone_name in self.enhanced_zones:
-            zone = self.enhanced_zones[zone_name]
-            if hasattr(zone, 'neuron_groups') and neuron_type in zone.neuron_groups:
-                neuron_group = zone.neuron_groups[neuron_type]
-                with torch.no_grad():
-                    if hasattr(neuron_group, 'slope'):
-                        neuron_group.slope.data *= 1.1
-                        neuron_group.slope.data.clamp_(5.0, 100.0)
-    
-    def _decrease_surrogate_slope(self, zone_name: str, neuron_type: str):
-        """Decrease surrogate slope for hyperactive neurons"""
-        if zone_name in self.enhanced_zones:
-            zone = self.enhanced_zones[zone_name]
-            if hasattr(zone, 'neuron_groups') and neuron_type in zone.neuron_groups:
-                neuron_group = zone.neuron_groups[neuron_type]
-                with torch.no_grad():
-                    if hasattr(neuron_group, 'slope'):
-                        neuron_group.slope.data *= 0.9
-                        neuron_group.slope.data.clamp_(5.0, 100.0)
-    
-    def _handle_neuron_fired(self, event):
-        zone = event.data.get('zone', 'unknown')
-        rate = event.data.get('firing_rate', 0)
-        print(f"🔥 FIRING: {zone} = {rate:.3f} Hz")
-    
-    def _handle_stats_updated(self, event):
-        """Handle brain statistics update events"""
-        # Could trigger rebalancing or other adaptations
-        pass
-    
-    def print_brain_summary(self):
-        """Print comprehensive brain summary"""
-        print("=" * 60)
-        print("ENHANCED BRAIN SUMMARY")
-        print("=" * 60)
-        
-        print(f"Neuromorphic Mode: {'Enabled' if self.use_neuromorphic else 'Disabled'}")
-        print(f"Total Zones: {len(self.zones)}")
-        print(f"Enhanced Zones: {len(self.enhanced_zones)}")
-        print(f"Model Dimension: {self.d_model}")
-        
-        if self.enhanced_zones:
-            print("\nEnhanced Zone Details:")
-            for zone_name, zone in self.enhanced_zones.items():
-                stats = zone.get_activity_stats()
-                # Fallback to configured counts if stats are not yet populated
-                total_neurons = stats.get('total_neurons') if isinstance(stats, dict) else None
-                if not total_neurons and hasattr(zone, 'neuron_counts'):
-                    try:
-                        total_neurons = sum(zone.neuron_counts.values())
-                    except Exception:
-                        total_neurons = 0
-                avg_firing = stats.get('avg_firing_rate', 0.0) if isinstance(stats, dict) and 'avg_firing_rate' in stats else 0.0
-                print(f"  {zone_name}: {total_neurons} neurons, {avg_firing:.4f} avg firing rate")
-        
-        # Print overall statistics
-        brain_stats = self.get_brain_statistics()
-        brain_stats.print_summary()
-        
-        # Check and report stability
-        stability = self.check_training_stability()
-        print("\nStability Report:")
-        healthy = sum(1 for status in stability.values() if status == "healthy")
-        total = len([s for s in stability.values() if s != "overall"])
-        print(f"  Healthy zones: {healthy}/{total}")
-        
-        if stability.get('overall') != 'stable':
-            print(f"  ⚠️  Overall status: {stability['overall']}")
-        
-        print("=" * 60)
+        # Detach routing info for CPU return to avoid blocking
+        return output, {
+            "routing": routing_out['probs'].detach().cpu().numpy(),
+            "activity": total_activity
+        }
+
+# Factory for convenience
+def create_aura_brain(d_model=1024, device='cuda') -> EnhancedBrain:
+    zones = {
+        'prefrontal': BrainZoneConfig(max_neurons=512, zone_type=BrainZoneType.PREFRONTAL_CORTEX),
+        'hippocampus': BrainZoneConfig(max_neurons=512, zone_type=BrainZoneType.HIPPOCAMPUS),
+        'temporal': BrainZoneConfig(max_neurons=512, zone_type=BrainZoneType.TEMPORAL_CORTEX),
+        'amygdala': BrainZoneConfig(max_neurons=256, zone_type=BrainZoneType.AMYGDALA),
+    }
+    return EnhancedBrain(d_model=d_model, zones_config=zones, device=device)
 
 # Backwards-compatible alias for tests expecting `Brain`
-from src.cli.config import BrainConfig, Config
+from cli.config import BrainConfig, Config
 
 class Brain(EnhancedBrain):
     """Backwards compatible Brain class.
@@ -699,63 +416,15 @@ class LiquidBrain:
             "stress_level": self.cns.stress_level
         }
 
-# Helper function to create a pre-configured neuromorphic brain for your Aura AI
-def create_aura_brain(d_model: int = 1024, 
-                      max_neurons_per_zone: int = 512,
-                      use_neuromorphic: bool = True) -> EnhancedBrain:
-    """Create a pre-configured brain for Aura AI with optimal zone setup"""
-    
-    # Layer configuration
-    layer_config = BaseLayerContainerConfig(
-        num_layers=3, 
-        layer_type='neuromorphic',
-        use_neuromorphic=True
-    )
-    
-    # Zone configurations optimized for general-purpose LLM
-    zone_configs = {
-        'prefrontal_cortex': BrainZoneConfig(
-            name='prefrontal_cortex',
-            max_neurons=max_neurons_per_zone,
-            min_neurons=max_neurons_per_zone // 2,
-            num_layers=3,
-            zone_type=BrainZoneType.PREFRONTAL_CORTEX,
-            use_spiking=True
-        ),
-        'temporal_cortex': BrainZoneConfig(
-            name='temporal_cortex', 
-            max_neurons=max_neurons_per_zone,
-            min_neurons=max_neurons_per_zone // 2,
-            num_layers=3,
-            zone_type=BrainZoneType.TEMPORAL_CORTEX,
-            use_spiking=True
-        ),
-        'hippocampus': BrainZoneConfig(
-            name='hippocampus',
-            max_neurons=max_neurons_per_zone,
-            min_neurons=max_neurons_per_zone // 2,
-            num_layers=2,
-            zone_type=BrainZoneType.HIPPOCAMPUS,
-            use_spiking=True
-        ),
-        'cerebellum': BrainZoneConfig(
-            name='cerebellum',
-            max_neurons=max_neurons_per_zone,
-            min_neurons=max_neurons_per_zone // 2,
-            num_layers=2,
-            zone_type=BrainZoneType.CEREBELLUM,
-            use_spiking=True
-        )
+# Factory for convenience
+def create_aura_brain(d_model=1024, device='cuda') -> EnhancedBrain:
+    zones = {
+        'prefrontal': BrainZoneConfig(max_neurons=512, zone_type=BrainZoneType.PREFRONTAL_CORTEX),
+        'hippocampus': BrainZoneConfig(max_neurons=512, zone_type=BrainZoneType.HIPPOCAMPUS),
+        'temporal': BrainZoneConfig(max_neurons=512, zone_type=BrainZoneType.TEMPORAL_CORTEX),
+        'amygdala': BrainZoneConfig(max_neurons=256, zone_type=BrainZoneType.AMYGDALA),
     }
-    
-    brain = EnhancedBrain(
-        config=layer_config,
-        zones=zone_configs,
-        d_model=d_model,
-        use_neuromorphic=True,
-        processing_mode=ProcessingMode.NEUROMORPHIC
-    )
-    return brain
+    return EnhancedBrain(d_model=d_model, zones_config=zones, device=device)
 
 def fix_neuromorphic_crisis(brain):
     """Emergency fix for 511+ firing rates"""
@@ -789,7 +458,7 @@ if __name__ == "__main__":
     
     # Create brain
     
-    brain = create_aura_brain(d_model=1024, use_neuromorphic=True)
+    brain = create_aura_brain(d_model=1024)
     # Attempt to load saved homeostasis state per zone (if available)
     try:
         import os

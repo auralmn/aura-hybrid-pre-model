@@ -1,44 +1,32 @@
+"""
+GPU-Native MoE Language Zone.
+
+Optimized to remove AsyncIO/CPU bottlenecks.
+Integrates Liquid MoE routing directly into the PyTorch forward pass.
+"""
+
 import torch
 import torch.nn as nn
-import numpy as np
-import asyncio
 from typing import Dict, List, Optional, Tuple
 
-from src.core.language_zone.spike_bridge import SpikeToContinuousBridge, ContinuousToSpikeBridge
-from src.core.language_zone.snn_expert import SNNExpert
-from src.core.language_zone.gif_neuron import GIFNeuron
-
-
-class TorchExpertWrapper:
-    """Wrapper to make torch SNNExpert compatible with numpy MoE router interface."""
-    
-    def __init__(self, torch_expert: SNNExpert):
-        self.expert = torch_expert
-    
-    def predict(self, x: np.ndarray) -> float:
-        return self.expert.predict(x)
-    
-    async def update(self, x: np.ndarray, target: float, token_ids: List[int], attention_bundle):
-        # Async wrapper
-        await asyncio.to_thread(self.expert.update, x, target, token_ids, attention_bundle)
-    
-    def state_dict(self) -> Dict:
-        return self.expert.state_dict()
-    
-    def load_state_dict(self, state: Dict):
-        self.expert.load_state_dict(state)
+# Import GPU-native components
+from core.language_zone.spike_bridge import SpikeToContinuousBridge, ContinuousToSpikeBridge
+from core.language_zone.snn_expert import SNNExpert
+from core.language_zone.gif_neuron import GIFNeuron
+# Ensure we import the GPU-native router we created earlier
+from core.liquid_moe import LiquidMoERouter
 
 
 class MoELanguageZone(nn.Module):
     """
-    Language Zone with integrated Liquid MoE routing.
+    Language Zone with integrated Liquid MoE routing (GPU Native).
     
     Architecture:
     1. Input spikes → GIF encoder
-    2. Spike → continuous bridge
-    3. Liquid MoE routing
+    2. Spike → continuous bridge (Rate Coding)
+    3. Liquid MoE routing (Batched)
     4. Expert processing (SNN-based)
-    5. Continuous → spike bridge
+    5. Continuous → spike bridge (Poisson)
     6. GIF decoder
     """
     
@@ -56,21 +44,25 @@ class MoELanguageZone(nn.Module):
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.hidden_dim = hidden_dim
+        self.moe_hidden_dim = moe_hidden_dim
+        self.top_k = top_k
+        self.num_experts = num_experts
         
-        # Binary embedding layer
+        # 1. Binary embedding layer
         self.embeddings = nn.Embedding(vocab_size, embed_dim)
         
-        # Encoder: embeddings → spikes
+        # 2. Encoder: embeddings → spikes
         self.encoder = GIFNeuron(embed_dim, hidden_dim, L=16)
         
-        # Spike → continuous bridge for MoE routing
+        # 3. Spike → continuous bridge for MoE routing
         self.spike_to_continuous = SpikeToContinuousBridge(
             spike_dim=hidden_dim,
             output_dim=moe_hidden_dim,
-            encoding='rate'
+            encoding='rate',
+            time_window=10
         )
         
-        # Create SNN experts
+        # 4. SNN Experts (ModuleDict for registration)
         self.experts = nn.ModuleDict({
             f'expert_{i}': SNNExpert(
                 input_dim=moe_hidden_dim,
@@ -80,51 +72,34 @@ class MoELanguageZone(nn.Module):
             for i in range(num_experts)
         })
         
-        # Liquid MoE router (will be set externally)
-        self.moe_router = None
-        self.top_k = top_k
-        self.moe_hidden_dim = moe_hidden_dim
+        # 5. Liquid MoE Router (Initialized internally to ensure GPU compat)
+        self.moe_router = LiquidMoERouter(
+            in_dim=moe_hidden_dim,
+            hidden_dim=64,
+            num_experts=num_experts,
+            top_k=top_k
+        )
         
-        # Continuous → spike bridge after MoE
+        # 6. Continuous → spike bridge after MoE
         self.continuous_to_spike = ContinuousToSpikeBridge(
             input_dim=moe_hidden_dim,
             spike_dim=hidden_dim,
             encoding='poisson'
         )
         
-        # Decoder: spikes → output
+        # 7. Decoder: spikes → output
         self.decoder = GIFNeuron(hidden_dim, embed_dim, L=16)
         
-        # Output projection
+        # 8. Output projection
         self.output_proj = nn.Linear(embed_dim, vocab_size)
-    
-    def setup_moe_router(self, LiquidMoERouter):
-        """
-        Setup Liquid MoE router with SNN experts.
         
-        Call this after initialization to inject your router class.
-        """
-        # Create expert dict for MoE router
-        # Wrap torch experts to provide numpy interface
-        expert_dict = {}
-        for name, expert in self.experts.items():
-            expert_dict[name] = TorchExpertWrapper(expert)
-        
-        # Initialize router
-        self.moe_router = LiquidMoERouter(
-            experts=expert_dict,
-            in_dim=self.moe_hidden_dim,
-            hidden_dim=64,  # Router's internal hidden dim
-            top_k=self.top_k
-        )
-    
-    async def forward_async(
+    def forward(
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, Dict]:
         """
-        Async forward pass with MoE routing.
+        Synchronous GPU forward pass with MoE routing.
         
         Args:
             input_ids: (batch, seq_len) token ids
@@ -140,101 +115,96 @@ class MoELanguageZone(nn.Module):
         # 1. Embed tokens
         embeds = self.embeddings(input_ids)  # (batch, seq_len, embed_dim)
         
-        # 2. Encode to spikes
-        spikes_enc, _ = self.encoder(embeds, state=None)  # (batch, seq_len, hidden_dim)
+        # 2. Encode to spikes (GIF maintains state internally or we pass None)
+        # Note: GIFNeuron needs to support sequence processing or we loop here.
+        # Assuming our optimized GIFNeuron can handle (B, T, D) -> (B, T, H)
+        spikes_enc, _ = self.encoder(embeds) 
         
-        # 3. Convert spikes to continuous for MoE routing
-        # Route per sequence position
-        outputs_list = []
-        routing_stats = {'expert_usage': {}, 'energy_total': 0.0}
+        # 3. Convert spikes to continuous features for Routing
+        # We need routing decisions at each timestep
+        # To avoid a slow loop, we can process the whole sequence if bridges allow
         
-        for t in range(seq_len):
-            spikes_t = spikes_enc[:, t:t+1, :]  # (batch, 1, hidden_dim)
-            continuous_t = self.spike_to_continuous(spikes_t)  # (batch, moe_hidden_dim) numpy
+        # If spike_to_continuous supports sequences:
+        # [B, T, Spike_Dim] -> [B, T, MoE_Dim]
+        # Our rate coding bridge uses a window, so we can apply it convolutionally or iteratively
+        
+        # For efficiency, let's treat (Batch * Seq) as a large batch
+        spikes_flat = spikes_enc.reshape(batch_size * seq_len, 1, self.hidden_dim)
+        # Bridge expects [Batch, Time, Dim]
+        continuous_flat = self.spike_to_continuous(spikes_flat) # [Batch*Seq, MoE_Dim]
+        
+        # 4. Route through Liquid MoE
+        # Router processes [Batch*Seq, Dim] in parallel
+        route_out = self.moe_router(continuous_flat)
+        
+        # route_out['indices']: [Batch*Seq, top_k]
+        # route_out['weights']: [Batch*Seq, top_k]
+        topk_indices = route_out['indices']
+        topk_weights = route_out['weights']
+        
+        # 5. Expert Dispatch (Vectorized)
+        # We need to run specific experts for specific tokens.
+        # Standard MoE approach: Permute tokens to experts, run, permute back.
+        # Or masked run: Run all experts, mask outputs.
+        
+        # Since num_experts is small (e.g. 8), masked run is often faster than sparse scatter/gather
+        # on modern GPUs due to memory access patterns.
+        
+        expert_outputs = torch.zeros(batch_size * seq_len, self.moe_hidden_dim, device=device)
+        
+        # Reshape inputs for experts: [Batch*Seq, 1, Dim] -> Expert -> [Batch*Seq, Dim]
+        expert_input = continuous_flat.unsqueeze(1) 
+        
+        # Iterate over experts
+        for i in range(self.num_experts):
+            # Find where this expert is selected (in top_k)
+            # mask: [Batch*Seq, top_k] boolean
+            is_selected = (topk_indices == i)
             
-            # 4. Route through MoE (per batch element)
-            batch_outputs = []
-            for b in range(batch_size):
-                x_b = continuous_t[b]  # (moe_hidden_dim,)
+            # If expert is not selected by anyone, skip
+            if not is_selected.any():
+                continue
                 
-                # Route to experts
-                route_info = await self.moe_router.route(x_b, attn_gain=1.0)
-                
-                # Get expert predictions
-                y_hat = route_info['y_hat']
-                batch_outputs.append(y_hat)
-                
-                # Track routing stats
-                for expert_name, gate in route_info['topk']:
-                    routing_stats['expert_usage'][expert_name] = \
-                        routing_stats['expert_usage'].get(expert_name, 0) + gate
-                routing_stats['energy_total'] += route_info['energy_j']
+            # Run expert on ALL inputs (or masked subset)
+            # Running on all is simpler for batching, masking later
+            # For 8 experts, this is 8x compute but regular.
+            # Optimization: Mask inputs?
+            # Creating dynamic batches causes sync. Let's run full batch and mask output.
             
-            # Collect batch outputs
-            outputs_t = np.array(batch_outputs).reshape(batch_size, 1)  # (batch, 1)
-            outputs_list.append(outputs_t)
+            # [Batch*Seq, 1, Dim] -> [Batch*Seq, Out_Dim]
+            ex_out = self.experts[f'expert_{i}'].predict(continuous_flat)
+            
+            # Weighted sum into output
+            # Weight for this expert: sum weights across top_k where index matches
+            # w: [Batch*Seq]
+            w = (topk_weights * is_selected.float()).sum(dim=1).unsqueeze(1)
+            
+            expert_outputs += ex_out * w
+            
+        # 6. Convert back to spikes
+        # [Batch*Seq, Dim] -> Spikes
+        spikes_moe = self.continuous_to_spike(expert_outputs, device)
         
-        # Stack outputs over time
-        outputs_np = np.concatenate(outputs_list, axis=1)  # (batch, seq_len)
-        outputs_np = np.expand_dims(outputs_np, -1)  # (batch, seq_len, 1)
-        
-        # Expand to moe_hidden_dim (repeat along feature dim)
-        outputs_np = np.repeat(outputs_np, self.moe_hidden_dim, axis=-1)  # (batch, seq_len, moe_hidden_dim)
-        
-        # 5. Convert back to spikes
-        spikes_moe = self.continuous_to_spike(
-            outputs_np.reshape(-1, self.moe_hidden_dim),
-            device=device
-        )  # (batch*seq_len, num_timesteps, hidden_dim)
-        
-        # Reshape and average over internal timesteps
+        # Reshape back to sequence: [Batch, Seq, Time_Internal, Dim]
         spikes_moe = spikes_moe.view(batch_size, seq_len, -1, self.hidden_dim)
-        spikes_moe = spikes_moe.mean(dim=2)  # (batch, seq_len, hidden_dim)
+        # Mean over internal time
+        spikes_moe_avg = spikes_moe.mean(dim=2)
         
-        # 6. Decode spikes to embeddings
-        decoded, _ = self.decoder(spikes_moe, state=None)  # (batch, seq_len, embed_dim)
+        # 7. Decode
+        decoded, _ = self.decoder(spikes_moe_avg)
         
-        # 7. Project to vocabulary
-        logits = self.output_proj(decoded)  # (batch, seq_len, vocab_size)
-        
-        return logits, routing_stats
-    
-    def forward(self, input_ids: torch.Tensor, attention_mask: Optional[torch.Tensor] = None):
-        """
-        Synchronous forward wrapper (blocks on async).
-        """
-        return asyncio.run(self.forward_async(input_ids, attention_mask))
-    
-    def forward_sync(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, Dict]:
-        """
-        Optimized synchronous forward (no async overhead).
-        Use this for production/training.
-        """
-        batch_size, seq_len = input_ids.shape
-        device = input_ids.device
-        
-        # For now, this is a simplified version without MoE routing
-        # In production, vectorize the MoE router for batch processing
-        
-        # 1. Embed tokens
-        embeds = self.embeddings(input_ids)
-        
-        # 2. Encode to spikes
-        spikes_enc, _ = self.encoder(embeds, state=None)
-        
-        # 3. For now, bypass MoE and go straight to decoder
-        # (MoE integration requires async or batch-optimized router)
-        
-        # 4. Decode spikes
-        decoded, _ = self.decoder(spikes_enc, state=None)
-        
-        # 5. Project to vocabulary
+        # 8. Project
         logits = self.output_proj(decoded)
         
-        routing_stats = {'expert_usage': {}, 'energy_total': 0.0}
-        
-        return logits, routing_stats
+        return logits, {
+            'probs': route_out['probs'].view(batch_size, seq_len, -1).detach().cpu()
+        }
+
+    # Backward compatibility
+    def setup_moe_router(self, *args, **kwargs):
+        pass # Router is now built-in
+    
+    def forward_async(self, *args, **kwargs):
+        # Redirect to synchronous forward
+        # Wrap result in future if caller expects awaitable (hacky)
+        raise DeprecationWarning("Use .forward() instead of .forward_async() for GPU execution")

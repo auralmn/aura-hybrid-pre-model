@@ -21,7 +21,7 @@ from typing import List, Dict, Tuple
 from functools import lru_cache
 import hashlib
 
-from src.core.language_zone.multi_channel_attention import (
+from core.language_zone.multi_channel_attention import (
     MultiChannelSpikingAttention,
     prosody_channels_from_text
 )
@@ -256,7 +256,7 @@ class OptimizedProsodyAttentionBridge(nn.Module):
 def benchmark_caching_performance():
     """Benchmark LRU caching performance improvement."""
     import time
-    from src.core.language_zone.prosody_attention import ProsodyAttentionBridge as BaseBridge
+    from core.language_zone.prosody_attention import ProsodyAttentionBridge as BaseBridge
     
     print("="*60)
     print("LRU Caching Performance Benchmark")

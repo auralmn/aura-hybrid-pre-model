@@ -1,82 +1,56 @@
-import threading
-import numpy as np
-from typing import Dict, Tuple, List, Optional
-from dataclasses import dataclass
+"""
+PyTorch Tensor Shim (Replaces legacy NumPy Memory Pool).
 
-@dataclass
-class PoolStats:
-    hits: int = 0
-    misses: int = 0
-    total_allocations: int = 0
-    peak_usage_mb: float = 0.0
+Modern PyTorch (via caching_allocator) manages memory better than manual pooling.
+This module maintains the API compatibility but delegates to torch.empty/zeros
+on the correct device to ensure full GPU pipeline compatibility.
+"""
+
+import torch
+import numpy as np
+from typing import Tuple, Union
+
+# Global default device
+_DEFAULT_DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def get_pooled_array(shape: tuple, 
+                     dtype: Union[np.dtype, torch.dtype] = torch.float32, 
+                     zero_fill: bool = True,
+                     device: torch.device = None) -> torch.Tensor:
+    """
+    Returns a PyTorch tensor. 
+    Maintains API compatibility with legacy code expecting 'pooled arrays'.
+    """
+    target_device = device or _DEFAULT_DEVICE
+    
+    # Map numpy types to torch types if necessary
+    if isinstance(dtype, type) and dtype.__module__ == 'numpy':
+        if dtype == np.float32: dtype = torch.float32
+        elif dtype == np.int64: dtype = torch.int64
+        # Add others as needed
+    
+    if zero_fill:
+        return torch.zeros(shape, dtype=dtype, device=target_device)
+    else:
+        return torch.empty(shape, dtype=dtype, device=target_device)
+
+def return_pooled_array(arr: Union[np.ndarray, torch.Tensor]) -> None:
+    """
+    No-op for PyTorch tensors. 
+    Let Python GC and PyTorch Caching Allocator handle it.
+    """
+    pass
 
 class ArrayPool:
-    """
-    Thread-safe memory pool for NumPy arrays to reduce allocation overhead.
-    Critical for SNN/Hebbian learning where many temporary arrays are created.
-    """
-    def __init__(self, max_pool_size_mb: int = 512):
-        self.max_pool_size = max_pool_size_mb * 1024 * 1024
-        self.pools: Dict[Tuple[tuple, np.dtype], List[np.ndarray]] = {}
-        self.current_usage = 0
-        self.stats = PoolStats()
-        self._lock = threading.Lock()
-
-    def get_array(self, shape: tuple, dtype: np.dtype = np.float32, zero_fill: bool = True) -> np.ndarray:
-        key = (shape, dtype)
-        with self._lock:
-            if key in self.pools and self.pools[key]:
-                arr = self.pools[key].pop()
-                self.stats.hits += 1
-                if zero_fill:
-                    arr.fill(0)
-                return arr
-            else:
-                # Allocate new if pool empty
-                arr = np.empty(shape, dtype=dtype)
-                if zero_fill:
-                    arr.fill(0)
-                self.stats.misses += 1
-                self.stats.total_allocations += 1
-                return arr
-
-    def return_array(self, arr: np.ndarray) -> None:
-        if arr is None:
-            return
+    """Legacy shim."""
+    def get_array(self, *args, **kwargs):
+        return get_pooled_array(*args, **kwargs)
         
-        key = (arr.shape, arr.dtype)
-        array_size = arr.nbytes
+    def return_array(self, *args, **kwargs):
+        pass
         
-        with self._lock:
-            # Only pool if we have space
-            if self.current_usage + array_size <= self.max_pool_size:
-                if key not in self.pools:
-                    self.pools[key] = []
-                
-                # Reset/clear not strictly needed if get_array zero_fills, 
-                # but good practice to not hold sensitive data
-                # We don't zero-fill here to save time on return, 
-                # rely on get_array to zero-fill if requested.
-                
-                self.pools[key].append(arr)
-                self.current_usage += array_size
-                
-                # Update peak usage stats
-                current_mb = self.current_usage / (1024 * 1024)
-                if current_mb > self.stats.peak_usage_mb:
-                    self.stats.peak_usage_mb = current_mb
-
     def clear(self):
-        with self._lock:
-            self.pools.clear()
-            self.current_usage = 0
+        pass
 
-# Global instance for easy access
+# Singleton compatibility
 _global_pool = ArrayPool()
-
-def get_pooled_array(shape: tuple, dtype: np.dtype = np.float32, zero_fill: bool = True) -> np.ndarray:
-    return _global_pool.get_array(shape, dtype, zero_fill)
-
-def return_pooled_array(arr: np.ndarray) -> None:
-    _global_pool.return_array(arr)
-
