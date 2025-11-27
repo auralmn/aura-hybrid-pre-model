@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
-from core.language_zone.gif_neuron import GIFNeuron
-from core.language_zone.synapsis import Synapsis
+from src.core.language_zone.gif_neuron import GIFNeuron
+from src.core.language_zone.synapsis import Synapsis
 
 class SNNExpert(nn.Module):
     """
