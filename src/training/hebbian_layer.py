@@ -1,142 +1,123 @@
-import numpy as np
+import torch
+import torch.nn as nn
 from dataclasses import dataclass
-from typing import Tuple, Dict, Optional, Any
+from typing import Tuple, Dict, Any, Optional
 import logging
-
-# Use optimized implementations
-from src.training.memory_pool import get_pooled_array, return_pooled_array
-from src.training.optimized_whitener import OptimizedWhitener
 
 logger = logging.getLogger(__name__)
 
 @dataclass
 class OjaStepOut:
-    y: np.ndarray
+    y: torch.Tensor
     residual_ema: float
     grew: bool
 
-class OjaLayer:
+class OjaLayer(nn.Module):
     """
-    Unsupervised Hebbian learning layer using Oja's Rule.
-    Features:
-    - Dynamic component growth (neurogenesis) based on residual error
-    - Whitened input processing
-    - Optimized for batch processing
+    GPU-Native Unsupervised Hebbian learning layer using Oja's Rule.
+    
+    Optimizations:
+    - Pure PyTorch implementation (avoids CPU/GPU sync)
+    - JIT-friendly operations
+    - In-place updates for memory efficiency
     """
     def __init__(self, n_components: int, input_dim: int, eta: float = 0.01, 
                  alpha: float = 0.99, threshold: float = 2.0, max_components: int = 2048):
-        self.K = n_components
+        super().__init__()
         self.input_dim = input_dim
-        self.eta = eta  # Learning rate
-        self.alpha = alpha  # EMA decay for residual tracking
-        self.threshold = threshold  # Growth threshold
+        self.eta = eta
+        self.alpha = alpha
+        self.threshold = threshold
         self.max_components = max_components
         
-        # Initialize weights
-        rng = np.random.default_rng(42)
-        W_init = rng.standard_normal((input_dim, n_components)).astype(np.float32)
+        # We manage K manually since it grows
+        self.register_buffer('K', torch.tensor(n_components, dtype=torch.int32))
         
-        if n_components <= input_dim:
-            # Orthonormalize if possible
-            q, _ = np.linalg.qr(W_init)
-            self.W = q.astype(np.float32)
-        else:
-            # Overcomplete: just normalize columns
-            norms = np.linalg.norm(W_init, axis=0, keepdims=True)
-            self.W = (W_init / (norms + 1e-8)).astype(np.float32)
+        # Initialize weights [Input, Max_Components]
+        # We pre-allocate max_components to avoid reallocation resizing on GPU
+        self.register_buffer('W_memory', torch.randn(input_dim, max_components) * 0.02)
         
-        # Tracking metrics
-        self.residual_ema = 0.0
-        self.age = 0
-        self.update_count = 0
+        # Normalize the active components
+        with torch.no_grad():
+            self.W_memory[:, :n_components] = torch.nn.functional.normalize(
+                self.W_memory[:, :n_components], dim=0
+            )
+            
+        self.register_buffer('residual_ema', torch.tensor(0.0))
+        self.register_buffer('update_count', torch.tensor(0, dtype=torch.long))
 
-    def step(self, xw: np.ndarray) -> OjaStepOut:
+    @property
+    def W(self):
+        """View of currently active weights"""
+        return self.W_memory[:, :self.K]
+
+    def forward(self, xw: torch.Tensor) -> torch.Tensor:
+        """Forward pass (Projection) without learning"""
+        return torch.matmul(xw, self.W)
+
+    def step(self, xw: torch.Tensor) -> OjaStepOut:
         """
-        Perform one Hebbian learning step.
+        Perform one Hebbian learning step on GPU.
         Args:
-            xw: Whitened input vector [input_dim]
+            xw: Whitened input vector [Batch, Input_Dim] or [Input_Dim]
         """
-        # 1. Compute projection: y = W^T * x
-        # y shape: [K]
-        y = self.W.T @ xw
+        # Ensure input is 2D [Batch, Dim]
+        if xw.dim() == 1:
+            xw = xw.unsqueeze(0)
+            
+        batch_size = xw.shape[0]
         
-        # 2. Reconstruct input: x_hat = W * y
-        # x_hat shape: [input_dim]
-        x_hat = self.W @ y
+        # 1. Compute projection: y = x @ W -> [Batch, K]
+        y = torch.matmul(xw, self.W)
+        
+        # 2. Reconstruct: x_hat = y @ W.T -> [Batch, Input]
+        x_hat = torch.matmul(y, self.W.t())
         
         # 3. Compute residual: r = x - x_hat
-        # We use pooled array to save memory for the diff
         residual = xw - x_hat
-        norm_residual = np.linalg.norm(residual)
         
-        # 4. Update EMA of residual
+        # Mean residual norm across batch
+        norm_residual = torch.norm(residual, dim=1).mean()
+        
+        # 4. Update EMA
         if self.update_count == 0:
             self.residual_ema = norm_residual
         else:
             self.residual_ema = self.alpha * self.residual_ema + (1 - self.alpha) * norm_residual
             
-        # 5. Oja's Rule Update: dW = eta * (x*y^T - W*(y*y^T))
-        # Simplified implementation: W += eta * y * (x - W*y)
-        # Note: (x - W*y) is exactly the residual we computed!
-        # So: dW = eta * outer(residual, y)
+        # 5. Oja's Rule Update (Vectorized for Batch)
+        # dW = eta * (x^T @ y - W * (y^T @ y))
+        # Or simplified: dW = eta * r^T @ y
+        # We average updates across the batch
+        dW = self.eta * torch.matmul(residual.t(), y) / batch_size
         
-        dW = self.eta * np.outer(residual, y)
-        self.W += dW
+        self.W_memory[:, :self.K] += dW
+        
+        # Re-normalize to prevent drift (Oja's rule approximates this, but explicit is more stable)
+        self.W_memory[:, :self.K] = torch.nn.functional.normalize(self.W_memory[:, :self.K], dim=0)
         
         # 6. Neurogenesis check
         grew = False
-        if self.residual_ema > self.threshold and self.K < self.max_components:
-            grew, new_k = self._grow_component(residual)
-            if grew:
-                # Expand y output for this step with 0 for new component
-                y_new = np.zeros(new_k, dtype=np.float32)
-                y_new[:len(y)] = y
-                y = y_new
-        
+        current_k = self.K.item()
+        if self.residual_ema > self.threshold and current_k < self.max_components:
+            grew = self._grow_component(residual.mean(dim=0))
+            
         self.update_count += 1
-        return OjaStepOut(y=y, residual_ema=self.residual_ema, grew=grew)
-
-    def _grow_component(self, residual: np.ndarray) -> Tuple[bool, int]:
-        """
-        Add a new component initialized to the current residual direction.
-        This rapidly captures unexplained variance.
-        """
-        if self.K >= self.max_components:
-            return False, self.K
-            
-        # Normalize residual for new weight
-        norm = np.linalg.norm(residual)
-        if norm < 1e-6:
-            return False, self.K
-            
-        new_w = (residual / norm).astype(np.float32)
         
-        # Expand weight matrix
-        # New shape: [input_dim, K+1]
-        self.W = np.column_stack((self.W, new_w))
+        return OjaStepOut(y=y, residual_ema=self.residual_ema.item(), grew=grew)
+
+    def _grow_component(self, avg_residual: torch.Tensor) -> bool:
+        current_k = self.K.item()
+        if current_k >= self.max_components:
+            return False
+            
+        # Normalize residual for new neuron weights
+        new_w = torch.nn.functional.normalize(avg_residual, dim=0)
+        
+        # Insert into pre-allocated memory
+        self.W_memory[:, current_k] = new_w
         self.K += 1
         
-        logger.info(f"🧬 OJA NEUROGENESIS: Residual {self.residual_ema:.3f} > {self.threshold}. Grew to K={self.K}")
-        
-        # Reset EMA to give new component time to settle
-        self.residual_ema *= 0.5 
-        return True, self.K
-
-    def transform(self, x: np.ndarray) -> np.ndarray:
-        """Forward pass without learning"""
-        return self.W.T @ x
-
-    def state_dict(self) -> Dict[str, Any]:
-        return {
-            "W": self.W,
-            "K": self.K,
-            "residual_ema": self.residual_ema,
-            "update_count": self.update_count
-        }
-
-    def load_state_dict(self, state: Dict[str, Any]):
-        self.W = state["W"]
-        self.K = state["K"]
-        self.residual_ema = state.get("residual_ema", 0.0)
-        self.update_count = state.get("update_count", 0)
-
+        logger.info(f"🧬 GPU NEUROGENESIS: Residual {self.residual_ema:.3f}. Grew to K={self.K}")
+        self.residual_ema *= 0.5
+        return True

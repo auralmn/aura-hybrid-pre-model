@@ -10,8 +10,8 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
-from src.base.neuron import AdaptiveLIFNeuron, LearnableSurrogateGradient, VectorizedLIFNeuron
-from src.base.events import EventBus
+from base.neuron import AdaptiveLIFNeuron, LearnableSurrogateGradient, VectorizedLIFNeuron
+from base.events import EventBus
 
 @dataclass
 class BaseLayerConfig:

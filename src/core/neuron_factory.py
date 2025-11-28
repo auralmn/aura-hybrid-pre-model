@@ -1,15 +1,15 @@
 import uuid
 import json
 import os
-from src.base import BaseNeuronConfig, NeuronalState, Synapse, MaturationStage, ActivityState
+from base import BaseNeuronConfig, NeuronalState, Synapse, MaturationStage, ActivityState
 
 import numpy as np
 
 from typing import Dict, Any, List, Optional, Union
-from src.base.events import EventBus
+from base.events import EventBus
 import torch
 import torch.nn as nn
-from src.base.neuron import AdaptiveLIFNeuron, IzhikevichNeuron, AdExNeuron
+from base.neuron import AdaptiveLIFNeuron, IzhikevichNeuron, AdExNeuron
 
 class Neuron:
 

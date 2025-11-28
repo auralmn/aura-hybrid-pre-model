@@ -41,8 +41,10 @@ class PlaceCellSemanticEncoder(nn.Module):
         self.config = config
         self.hippocampus = hippocampus
         
-        # Standard token embedding
+        # Standard token embedding with proper initialization
         self.token_embedding = nn.Embedding(config.vocab_size, config.embedding_dim)
+        # Initialize embeddings with smaller variance for stability
+        nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
         
         # Project to place cell space
         # This creates a "semantic map" like spatial maps in hippocampus
@@ -105,7 +107,8 @@ class PlaceCellSemanticEncoder(nn.Module):
         
         # 5. Residual connection (preserve original information)
         # This is like the direct pathway in hippocampus (CA3 -> CA1)
-        semantic_embedding = reconstructed + token_embeds
+        # Scale down the reconstructed signal to avoid overwhelming the original embedding
+        semantic_embedding = token_embeds + 0.1 * reconstructed
         
         return semantic_embedding, place_cell_activity
     

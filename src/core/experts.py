@@ -2,8 +2,9 @@ import numpy as np
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
-@dataclass
-class ExpertNLMSHead:
+
+
+class ExpertHead:
     n_features: int
     vocab_size: int
     attention_config: Dict[str, Any]
@@ -72,7 +73,7 @@ class ExpertNLMSHead:
         self.update_count = state.get("update_count", 0)
 
 class NLMSExpertAdapter:
-    def __init__(self, neuron: ExpertNLMSHead):
+    def __init__(self, neuron: ExpertHead):
         self.neuron = neuron
         
     def predict(self, x: np.ndarray) -> float:
@@ -88,3 +89,5 @@ class NLMSExpertAdapter:
     def load_state_dict(self, state: Dict):
         self.neuron.load_state_dict(state)
 
+
+ExpertNLMSHead = ExpertHead

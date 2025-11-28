@@ -10,11 +10,12 @@ Integrates all hippocampal components:
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from typing import Optional, Tuple, List
 
-from src.core.language_zone.theta_gamma_encoding import ThetaGammaPositionalEncoding
-from src.core.language_zone.place_cell_encoder import PlaceCellSemanticEncoder
-from src.core.language_zone.hippocampal_layer import HippocampalTransformerLayer
+from core.language_zone.theta_gamma_encoding import ThetaGammaPositionalEncoding
+from core.language_zone.place_cell_encoder import PlaceCellSemanticEncoder
+from core.language_zone.hippocampal_layer import HippocampalTransformerLayer
 
 class HippocampalTransformer(nn.Module):
     """
@@ -29,6 +30,9 @@ class HippocampalTransformer(nn.Module):
         super().__init__()
         self.config = config
         self.hippocampus = hippocampus
+        
+        # Optimization flags
+        self.use_gradient_checkpointing = getattr(config, 'use_gradient_checkpointing', False)
         
         # 1. Embeddings & Encodings
         self.pos_encoder = ThetaGammaPositionalEncoding(config)
@@ -45,9 +49,23 @@ class HippocampalTransformer(nn.Module):
         # 3. Output Head
         self.output_head = nn.Linear(config.embedding_dim, config.vocab_size, bias=False)
         
-        # Tie weights (optional but standard)
-        # self.output_head.weight = self.semantic_encoder.token_embedding.weight
+        # Weight tying: share embedding weights with output projection
+        self.output_head.weight = self.semantic_encoder.token_embedding.weight
+    
+    def set_gradient_checkpointing(self, enable: bool = True):
+        """Enable or disable gradient checkpointing for memory optimization."""
+        self.use_gradient_checkpointing = enable
         
+    def _layer_forward(
+        self,
+        layer: HippocampalTransformerLayer,
+        hidden_states: torch.Tensor,
+        prosody: Optional[torch.Tensor],
+        use_memory: bool
+    ) -> torch.Tensor:
+        """Helper for gradient checkpointing compatibility."""
+        return layer(hidden_states, prosody=prosody, use_memory=use_memory)
+    
     def forward(
         self, 
         input_ids: torch.Tensor, 
@@ -56,24 +74,13 @@ class HippocampalTransformer(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass.
-        
-        Args:
-            input_ids: [batch, seq_len]
-            prosody: [batch, seq_len, 4]
-            use_memory: Whether to use hippocampal memory
-            
-        Returns:
-            logits: [batch, seq_len, vocab_size]
-            place_cell_activity: [batch, seq_len, n_place_cells] (for memory creation)
         """
         batch_size, seq_len = input_ids.shape
         
         # 1. Semantic Encoding (Place Cells)
-        # Returns: [batch, seq_len, dim], [batch, seq_len, n_place_cells]
         hidden_states, place_cell_activity = self.semantic_encoder(input_ids)
         
         # 2. Positional Encoding (Theta-Gamma)
-        # Generate position indices [1, seq_len]
         positions = torch.arange(seq_len, device=input_ids.device).unsqueeze(0)
         pos_encoding = self.pos_encoder(positions, seq_length=seq_len)
         hidden_states = hidden_states + pos_encoding
@@ -81,13 +88,23 @@ class HippocampalTransformer(nn.Module):
         hidden_states = self.layer_norm(hidden_states)
         hidden_states = self.dropout(hidden_states)
         
-        # 3. Transformer Layers
+        # 3. Transformer Layers (with optional gradient checkpointing)
         for layer in self.layers:
-            hidden_states = layer(
-                hidden_states, 
-                prosody=prosody, 
-                use_memory=use_memory
-            )
+            if self.training and self.use_gradient_checkpointing:
+                hidden_states = checkpoint(
+                    self._layer_forward,
+                    layer,
+                    hidden_states,
+                    prosody,
+                    use_memory,
+                    use_reentrant=False
+                )
+            else:
+                hidden_states = layer(
+                    hidden_states, 
+                    prosody=prosody, 
+                    use_memory=use_memory
+                )
             
         # 4. Output Head
         logits = self.output_head(hidden_states)

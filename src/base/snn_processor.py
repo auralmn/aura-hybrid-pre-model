@@ -10,8 +10,8 @@ from enum import Enum
 import torch
 import torch.nn as nn
 
-from src.base.events import EventBus
-from src.maths.softmax import softmax as np_softmax
+from base.events import EventBus
+from maths.softmax import softmax as np_softmax
 import numpy as np
 from typing import Tuple
 from dataclasses import dataclass

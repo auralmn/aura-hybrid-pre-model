@@ -9,16 +9,16 @@ import time
 import torch
 import torch.nn as nn
 import numpy as np
-from src.clityping import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List
 import argparse
 import logging
 
 # Import our optimizations
-from src.clisrc.training.colab_utils import setup_colab_environment, get_model_preset, print_gpu_status
-from src.clisrc.training.memory_manager import maybe_empty_cuda_cache, get_memory_stats
-from src.clisrc.training.stdp_learning import STDPLearner
-from src.clisrc.training.hebbian_layer import OjaLayer
-from src.cliencoders.fast_hash_embedder import FastHashEmbedder
+from training.colab_utils import setup_colab_environment, get_model_preset, print_gpu_status
+from training.memory_manager import maybe_empty_cuda_cache, get_memory_stats
+from training.stdp_learning import STDPLearner
+from training.hebbian_layer import OjaLayer
+from encoders.fast_hash_embedder import FastHashEmbedder
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -136,7 +136,7 @@ def main():
     
     # 4. Load Data
     # TODO: Use hf_dataset_loader
-    logger.info(f"Loading data from src.cli{args.vocab_dir}...")
+    logger.info(f"Loading data from {args.vocab_dir}...")
     
     # Placeholder for dataset creation
     # dataset = MixedTextDataset(vocab_src_dir=args.vocab_dir)

@@ -24,9 +24,9 @@ script_dir = Path(__file__).parent
 project_root = script_dir.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.core.hippocampal import HippocampalFormation
-from src.core.language_zone.hippocampal_transformer import HippocampalTransformer
-from src.training.hippocampal_trainer import HippocampalTransformerTrainer
+from core.hippocampal import HippocampalFormation
+from core.language_zone.hippocampal_transformer import HippocampalTransformer
+from training.hippocampal_trainer import HippocampalTransformerTrainer
 
 @dataclass
 class Config:

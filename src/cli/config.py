@@ -2,11 +2,11 @@ from ast import Dict
 from dataclasses import dataclass, field
 from typing import List
 
-from src.base.brain_zones import BrainZoneConfig
-from src.base.brain_zone_factory import BrainZoneFactory
-from src.base.layers import BaseLayerContainerConfig
-from src.core.layers_factory import LayersFactory
-from src.core.neuron_factory import NeuronFactory
+from base.brain_zones import BrainZoneConfig
+from base.brain_zone_factory import BrainZoneFactory
+from base.layers import BaseLayerContainerConfig
+from core.layers_factory import LayersFactory
+from core.neuron_factory import NeuronFactory
 
 @dataclass
 class Config:

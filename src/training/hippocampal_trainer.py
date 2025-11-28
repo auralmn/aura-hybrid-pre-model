@@ -1,79 +1,75 @@
 """
-Hippocampal Transformer Trainer
+Hippocampal Transformer Trainer (Natural Brain Compatible)
 
-Implements the biologically plausible training loop with:
-1. Wake Phase: Standard learning + memory encoding
-2. Sleep Phase: Memory replay + consolidation
-3. EWC: Elastic Weight Consolidation to prevent catastrophic forgetting
+Optimized to remove all NumPy dependencies.
+- ReplayBuffer uses torch.randperm for sampling.
+- Fully compatible with the GPU-native Natural Brain architecture.
+- Includes gradient checkpointing, cosine LR schedule, and monitoring.
 """
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
-from typing import List, Tuple, Optional, Dict
-import random
-from collections import deque
-import numpy as np
-import copy
+import math
+from typing import List, Tuple, Optional, Any, Dict
+import time
+
+from src.training.losses import HippocampalLoss
+
+
+def get_cosine_schedule_with_warmup(
+    optimizer: torch.optim.Optimizer,
+    warmup_steps: int,
+    max_steps: int,
+    min_lr_ratio: float = 0.1
+):
+    """
+    Cosine decay learning rate schedule with linear warmup.
+    
+    Args:
+        optimizer: PyTorch optimizer
+        warmup_steps: Number of warmup steps
+        max_steps: Total training steps
+        min_lr_ratio: Minimum LR as fraction of initial LR
+    """
+    def lr_lambda(current_step: int) -> float:
+        if current_step < warmup_steps:
+            return float(current_step) / float(max(1, warmup_steps))
+        progress = float(current_step - warmup_steps) / float(max(1, max_steps - warmup_steps))
+        cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine_decay
+    
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 class ReplayBuffer:
     """
-    Episodic Memory Store (Replay Buffer).
-    Stores experiences (input_ids, labels, loss) and samples based on priority.
+    Experience Replay Buffer (PyTorch Native).
     """
     def __init__(self, capacity: int = 50000):
         self.capacity = capacity
-        # Store as list of tuples: (input_ids, labels, loss)
-        self.buffer = []
+        self.buffer: List[Tuple[torch.Tensor, torch.Tensor, float]] = []
         
     def add(self, input_ids: torch.Tensor, labels: torch.Tensor, loss: float):
-        """Add experience to buffer. Breaks batches into individual samples."""
         batch_size = input_ids.size(0)
+        input_cpu = input_ids.detach().cpu()
+        labels_cpu = labels.detach().cpu()
         
-        # Store each sample individually
         for i in range(batch_size):
             if len(self.buffer) >= self.capacity:
-                # FIFO eviction
                 self.buffer.pop(0)
-                
-            # Store detached tensors to save memory
-            self.buffer.append((
-                input_ids[i].detach().cpu(),  # [seq_len]
-                labels[i].detach().cpu(),      # [seq_len]
-                float(loss)
-            ))
-        
-    def sample(self, batch_size: int) -> List[Tuple[torch.Tensor, torch.Tensor, float]]:
-        """
-        Sample experiences based on priority (loss).
-        Higher loss = higher probability of being sampled (prioritized replay).
-        """
-        if not self.buffer:
-            return []
+            self.buffer.append((input_cpu[i], labels_cpu[i], loss))
             
-        losses = np.array([item[2] for item in self.buffer])
-        # Add small epsilon to avoid 0 probability
-        probs = losses + 1e-6
-        probs = probs / probs.sum()
-        
-        indices = np.random.choice(
-            len(self.buffer), 
-            size=min(batch_size, len(self.buffer)), 
-            p=probs,
-            replace=False
-        )
-        
+    def sample(self, batch_size: int) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        n = len(self.buffer)
+        if n == 0: return []
+        k = min(n, batch_size)
+        indices = torch.randperm(n)[:k].tolist()
         return [self.buffer[i] for i in indices]
         
     def __len__(self):
         return len(self.buffer)
 
-
 class EWCConsolidator:
-    """
-    Elastic Weight Consolidation (EWC).
-    Computes Fisher Information Matrix to constrain important weights.
-    """
+    """Elastic Weight Consolidation (PyTorch Native)."""
     def __init__(self, model: nn.Module, lambda_ewc: float = 0.4):
         self.model = model
         self.lambda_ewc = lambda_ewc
@@ -81,71 +77,78 @@ class EWCConsolidator:
         self.optpar = {}
         
     def compute_fisher(self, dataloader, device):
-        """Compute Fisher Information Matrix."""
         self.fisher = {}
         self.optpar = {}
         
-        # Initialize Fisher dict
         for name, param in self.model.named_parameters():
             if param.requires_grad:
                 self.fisher[name] = torch.zeros_like(param.data)
                 self.optpar[name] = param.data.clone()
                 
         self.model.eval()
-        
         count = 0
-        for input_ids, labels in dataloader:
+        
+        for inputs, labels in dataloader:
             self.model.zero_grad()
-            input_ids = input_ids.to(device)
+            inputs = inputs.to(device)
             labels = labels.to(device)
             
-            # Forward pass
-            if hasattr(self.model, 'forward_train'):
-                outputs = self.model.forward_train(input_ids)
+            output = self.model(inputs)
+            # Handle tuple return (logits, info)
+            if isinstance(output, tuple):
+                logits = output[0]
             else:
-                outputs = self.model(input_ids)
+                logits = output
                 
-            if isinstance(outputs, tuple):
-                logits = outputs[0]
-            else:
-                logits = outputs
-                
-            # Calculate loss (NLL)
-            loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), labels.view(-1))
+            # Shift for next-token prediction
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = labels[..., 1:].contiguous()
+            
+            loss = nn.CrossEntropyLoss()(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             loss.backward()
             
-            # Accumulate squared gradients
             for name, param in self.model.named_parameters():
                 if param.requires_grad and param.grad is not None:
                     self.fisher[name] += param.grad.data ** 2
             
             count += 1
-            if count >= 100:
-                break
+            if count >= 50: break
                 
-        # Normalize
-        for name in self.fisher:
-            self.fisher[name] /= count
+        if count > 0:
+            for name in self.fisher:
+                self.fisher[name] /= count
             
     def penalty(self, model: nn.Module) -> torch.Tensor:
-        """Calculate EWC penalty loss."""
-        loss = 0
+        loss = 0.0
         for name, param in model.named_parameters():
             if name in self.fisher:
                 fisher = self.fisher[name].to(param.device)
                 optpar = self.optpar[name].to(param.device)
                 loss += (fisher * (param - optpar) ** 2).sum()
-        return self.lambda_ewc * loss
-
+        return loss * self.lambda_ewc
 
 class HippocampalTransformerTrainer:
     """
-    Trainer orchestrating Wake/Sleep phases and Memory Consolidation.
+    Main Trainer Class (Natural Brain Ready).
+    
+    Features:
+    - Gradient checkpointing support
+    - Cosine LR schedule with warmup
+    - Memory warmup (disable hippocampal memory during early training)
+    - Gradient clipping and monitoring
+    - Mixed precision training support
     """
-    def __init__(self, model, config, hippocampus):
+    def __init__(self, model, config, hippocampus, optimizer: Optional[torch.optim.Optimizer] = None):
         self.model = model
         self.config = config
         self.hippocampus = hippocampus
+        
+        self.criterion = HippocampalLoss(
+            label_smoothing=getattr(config, 'label_smoothing', 0.1),
+            entropy_lambda=getattr(config, 'entropy_lambda', 0.05),
+            sparsity_lambda=getattr(config, 'sparsity_lambda', 0.02),
+            target_sparsity=getattr(config, 'target_sparsity', 0.03)
+        )
         
         self.replay_buffer = ReplayBuffer(capacity=getattr(config, 'replay_buffer_size', 50000))
         self.ewc = EWCConsolidator(model, lambda_ewc=getattr(config, 'ewc_lambda', 0.4))
@@ -153,98 +156,194 @@ class HippocampalTransformerTrainer:
         self.phase = "wake"
         self.global_step = 0
         self.sleep_interval = getattr(config, 'sleep_interval', 1000)
-        self.sleep_steps = getattr(config, 'sleep_steps', 100)
+        
+        # Optimization settings
+        self.warmup_steps = getattr(config, 'warmup_steps', 2000)
+        self.max_steps = getattr(config, 'max_steps', 100000)
+        self.memory_warmup_steps = getattr(config, 'memory_warmup_steps', 5000)
+        self.gradient_clip = getattr(config, 'gradient_clip', 1.0)
+        self.min_lr_ratio = getattr(config, 'min_lr_ratio', 0.1)
+        
+        # LR Scheduler (created if optimizer provided)
+        self.optimizer = optimizer
+        self.scheduler = None
+        if optimizer is not None:
+            self.scheduler = get_cosine_schedule_with_warmup(
+                optimizer,
+                warmup_steps=self.warmup_steps,
+                max_steps=self.max_steps,
+                min_lr_ratio=self.min_lr_ratio
+            )
+        
+        # Monitoring
+        self.metrics: Dict[str, float] = {
+            'loss': 0.0,
+            'grad_norm': 0.0,
+            'lr': 0.0,
+            'perplexity': 0.0
+        }
+        
+        # Enable gradient checkpointing if configured
+        if getattr(config, 'use_gradient_checkpointing', False):
+            if hasattr(model, 'set_gradient_checkpointing'):
+                model.set_gradient_checkpointing(True)
+                print("Gradient checkpointing enabled")
         
     def step_counter(self):
-        """Increment step and check for phase transition."""
         self.global_step += 1
+        if self.phase == "wake" and self.global_step % self.sleep_interval == 0:
+            self.phase = "sleep"
+            print(f"Entering SLEEP phase at step {self.global_step}")
+    
+    def should_use_memory(self) -> bool:
+        """Determine if hippocampal memory should be active."""
+        return self.global_step >= self.memory_warmup_steps
+    
+    def clip_gradients(self) -> float:
+        """Clip gradients and return the norm."""
+        if self.gradient_clip > 0:
+            return torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), 
+                max_norm=self.gradient_clip
+            ).item()
+        return 0.0
+    
+    def get_lr(self) -> float:
+        """Get current learning rate."""
+        if self.scheduler is not None:
+            return self.scheduler.get_last_lr()[0]
+        elif self.optimizer is not None:
+            return self.optimizer.param_groups[0]['lr']
+        return 0.0
+    
+    def log_metrics(self, loss: float, grad_norm: float):
+        """Update and optionally print metrics."""
+        self.metrics['loss'] = loss
+        self.metrics['grad_norm'] = grad_norm
+        self.metrics['lr'] = self.get_lr()
+        self.metrics['perplexity'] = math.exp(min(loss, 20))  # Clamp to avoid overflow
         
-        if self.phase == "wake":
-            if self.global_step % self.sleep_interval == 0:
-                self.phase = "sleep"
-                print(f"🌙 Entering SLEEP phase at step {self.global_step}")
-        elif self.phase == "sleep":
-            pass
+        if self.global_step % 100 == 0:
+            mem_status = "ON" if self.should_use_memory() else "OFF"
+            print(f"Step {self.global_step} | Loss: {loss:.4f} | PPL: {self.metrics['perplexity']:.2f} | "
+                  f"Grad: {grad_norm:.2f} | LR: {self.metrics['lr']:.2e} | Memory: {mem_status}")
 
-    # If your trainer doesn't have reverse replay, add this:
-    def train_step_sleep(self, reverse=False):
-        """Sleep step with forward or backward replay"""
-        if len(self.replay_buffer) == 0:
-            return None
+    def train_step_wake(self, batch) -> torch.Tensor:
+        """
+        Execute one training step in Wake phase.
+        Supports both standard models and NaturalBrain architecture.
         
-        # Sample batch
-        samples = self.replay_buffer.sample(config.batch_size)
+        Returns:
+            loss: The computed loss tensor (not yet backpropagated)
+        """
+        input_ids, labels, prosody = batch
         
-        if reverse:
-            # Backward replay: reverse the sequence order
-            samples = samples[::-1]
+        # Determine if memory should be active (warmup period)
+        use_memory = self.should_use_memory()
         
-        # Stack into batch
-        input_ids = torch.stack([s[0] for s in samples]).to(device)
-        labels = torch.stack([s[1] for s in samples]).to(device)
+        # Forward pass with prosody and conditional memory
+        output = self.model(input_ids, prosody=prosody, use_memory=use_memory)
         
-        # Forward pass (no memory creation during sleep)
-        logits, _ = self.model(input_ids)
-        loss = nn.CrossEntropyLoss()(
-            logits.view(-1, config.vocab_size),
-            labels.view(-1)
-        )
-        
-        return loss
-
-  
-
-            
-    def should_sleep(self) -> bool:
-        """Check if sleep phase should start."""
-        return self.global_step > 0 and self.global_step % self.sleep_interval == 0
-        
-    def train_step_wake(self, batch):
-        """Standard training step + memory storage."""
-        input_ids, labels = batch
-        
-        outputs = self.model(input_ids)
-        if isinstance(outputs, tuple):
-            logits = outputs[0]
+        # Handle NaturalBrain (tuple output) vs Standard (maybe tuple or tensor)
+        info = {}
+        if isinstance(output, tuple):
+            logits = output[0]
+            place_cell_activity = output[1] if len(output) > 1 else None
+            info = output[2] if len(output) > 2 else {}
         else:
-            logits = outputs
-            
-        loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), labels.view(-1))
+            logits = output
+            place_cell_activity = None
         
+        # Shift for next-token prediction
+        shift_logits = logits[..., :-1, :].contiguous()
+        shift_labels = labels[..., 1:].contiguous()
+        
+        loss = self.criterion(shift_logits, shift_labels, place_cell_activity)
+        
+        # Add EWC penalty (only after warmup)
+        if self.ewc.fisher and self.global_step > self.warmup_steps:
+            loss = loss + self.ewc.penalty(self.model)
+            
+        # Update Brain Homeostasis (NaturalBrain Feature)
+        if hasattr(self.model, 'update_homeostasis'):
+            est_acc = torch.exp(-loss.detach()).item()
+            self.model.update_homeostasis({'accuracy': est_acc})
+            
+            if self.global_step % 100 == 0 and isinstance(info, dict):
+                h = info.get('hormones', {})
+                cort = h.get('cortisol', 0.0)
+                dopa = h.get('dopamine', 0.0)
+                print(f"   Hormones: Cortisol={cort:.3f} | Dopamine={dopa:.3f}")
+            
+        # Store in Replay Buffer
         self.replay_buffer.add(input_ids, labels, loss.item())
         
-        if self.ewc.fisher:
-            loss += self.ewc.penalty(self.model)
-            
         return loss
+    
+    def train_step(self, batch) -> Dict[str, float]:
+        """
+        Complete training step with backward pass, gradient clipping, and scheduler step.
         
-    def train_step_sleep(self):
-        """Replay step (Sleep phase)."""
-        batch = self.replay_buffer.sample(self.config.batch_size)
-        if not batch:
-            return None
+        Args:
+            batch: Tuple of (input_ids, labels, prosody)
             
-        # Unpack batch - now each item is [seq_len] not [batch, seq_len]
-        input_ids = torch.stack([item[0] for item in batch]).to(next(self.model.parameters()).device)
-        labels = torch.stack([item[1] for item in batch]).to(next(self.model.parameters()).device)
+        Returns:
+            Dictionary with metrics
+        """
+        if self.optimizer is None:
+            raise ValueError("Optimizer not set. Pass optimizer to __init__ or use train_step_wake for loss only.")
+        
+        self.optimizer.zero_grad()
+        
+        # Forward and compute loss
+        loss = self.train_step_wake(batch)
+        
+        # Backward
+        loss.backward()
+        
+        # Clip gradients
+        grad_norm = self.clip_gradients()
+        
+        # Optimizer step
+        self.optimizer.step()
+        
+        # Scheduler step
+        if self.scheduler is not None:
+            self.scheduler.step()
+        
+        # Log metrics
+        self.log_metrics(loss.item(), grad_norm)
+        
+        # Update step counter
+        self.step_counter()
+        
+        return {
+            'loss': loss.item(),
+            'grad_norm': grad_norm,
+            'lr': self.get_lr(),
+            'perplexity': self.metrics['perplexity']
+        }
+
+    def train_step_sleep(self) -> Optional[torch.Tensor]:
+        """Execute one replay step in Sleep phase."""
+        batch = self.replay_buffer.sample(self.config.batch_size)
+        if not batch: return None
+        
+        device = next(self.model.parameters()).device
+        input_ids = torch.stack([item[0] for item in batch]).to(device)
+        labels = torch.stack([item[1] for item in batch]).to(device)
         
         # Forward Replay
-        outputs = self.model(input_ids)
-        if isinstance(outputs, tuple):
-            logits = outputs[0]
-        else:
-            logits = outputs
-        loss = nn.CrossEntropyLoss()(logits.view(-1, logits.size(-1)), labels.view(-1))
+        output = self.model(input_ids)
+        logits = output[0] if isinstance(output, tuple) else output
+        loss = self.criterion.ce_loss(logits.view(-1, logits.size(-1)), labels.view(-1))
         
-        # Backward Replay (Reverse Sequence)
-        input_ids_rev = torch.flip(input_ids, dims=[1])
+        # Backward Replay
+        input_rev = torch.flip(input_ids, dims=[1])
         labels_rev = torch.flip(labels, dims=[1])
         
-        outputs_rev = self.model(input_ids_rev)
-        if isinstance(outputs_rev, tuple):
-            logits_rev = outputs_rev[0]
-        else:
-            logits_rev = outputs_rev
-        loss_rev = nn.CrossEntropyLoss()(logits_rev.view(-1, logits_rev.size(-1)), labels_rev.view(-1))
+        output_rev = self.model(input_rev)
+        logits_rev = output_rev[0] if isinstance(output_rev, tuple) else output_rev
+        loss_rev = self.criterion.ce_loss(logits_rev.view(-1, logits_rev.size(-1)), labels_rev.view(-1))
         
         return loss + loss_rev

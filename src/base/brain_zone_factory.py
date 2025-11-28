@@ -6,7 +6,7 @@ import torch
 
 from src.base.layers import BaseLayer, BaseLayerConfig, BaseLayerImplementation
 from src.base.events import EventBus
-from src.base.snn_brain_zones import BrainZone, BrainZoneConfig, BrainZoneType, SpikingNeuronConfig
+from src.base.snn_brain_zones import NeuromorphicBrainZone as BrainZone, BrainZoneConfig, BrainZoneType, SpikingNeuronConfig
 
 # -----------------------------
 # Pattern CSV integration helpers

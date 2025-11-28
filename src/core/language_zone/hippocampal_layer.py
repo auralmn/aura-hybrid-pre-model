@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 from typing import Optional, Tuple
 
-from src.core.language_zone.hippocampal_attention import HippocampalProsodyAttention
+from core.language_zone.hippocampal_attention import HippocampalProsodyAttention
 
 class HippocampalTransformerLayer(nn.Module):
     """
